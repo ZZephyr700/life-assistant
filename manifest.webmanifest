@@ -1,0 +1,16 @@
+{
+  "name": "我的工作生活助手",
+  "short_name": "生活助手",
+  "description": "只属于你一个人的本地工作生活助手：计划、饮食、娱乐、健身、冥想、日记与习惯，数据全部保存在本机。",
+  "lang": "zh-CN",
+  "start_url": "index.html?source=pwa",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f4f5f8",
+  "theme_color": "#4f6ef7",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

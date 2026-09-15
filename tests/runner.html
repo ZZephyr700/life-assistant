@@ -1,0 +1,1276 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>生活助手 - 自动化测试</title>
+<style>
+  body{font-family:"Segoe UI","Microsoft YaHei",sans-serif;margin:0;background:#f4f5f8;color:#1f2329}
+  #bar{position:sticky;top:0;background:#1d2027;color:#fff;padding:14px 24px;font-size:15px;z-index:9;display:flex;gap:20px;align-items:center}
+  #bar b{font-size:18px}
+  #results{padding:20px 24px 80px;max-width:900px}
+  .grp{background:#fff;border:1px solid #e8eaef;border-radius:12px;margin-bottom:14px;overflow:hidden}
+  .grp h3{margin:0;padding:12px 16px;font-size:14px;background:#fafbff;border-bottom:1px solid #e8eaef}
+  .t{padding:9px 16px;border-top:1px solid #f0f1f5;font-size:13px;display:flex;gap:10px;align-items:flex-start}
+  .t:first-of-type{border-top:none}
+  .tag{font-weight:700;width:46px;flex-shrink:0}
+  .pass .tag{color:#2fb36e}.fail .tag{color:#e5484d}
+  .fail .msg{color:#e5484d;white-space:pre-wrap;margin-top:3px;font-size:12.5px}
+  #app{display:block;width:100%;height:520px;border:2px solid #ccc;opacity:1;background:#fff;margin-bottom:30px}
+</style>
+</head>
+<body>
+<div id="bar"><span>🧪 生活助手自动化测试</span><b id="runstate">运行中…</b><span id="counts"></span></div>
+<iframe id="app" title="app"></iframe>
+<div id="results"></div>
+<script>
+/* ================= 测试框架 ================= */
+const frame=document.getElementById('app');
+const results=document.getElementById('results');
+let W,D;
+let passed=0,failed=0;
+
+/* 真实墙钟等待：仅防抖/计时器等确需真实时间的测试使用（失焦窗口下定时器约 1s 粒度） */
+const rsleep=ms=>new Promise(r=>setTimeout(r,ms));
+/* 宏任务滴答：后台/失焦窗口中 setTimeout 会被节流到约 1s，
+   MessageChannel 宏任务不被节流，用它让出事件循环以推进渲染/IDB/事件回调 */
+function mtick(n){ return new Promise(res=>{ const ch=new MessageChannel(); let i=0; ch.port1.onmessage=()=>{ if(++i>=n){ch.port1.onmessage=null;res();} else ch.port2.postMessage(0); }; ch.port2.postMessage(0); }); }
+/* settle 等待：按等待时长折算成少量宏任务滴答（不再依赖被节流的定时器） */
+const sleep=ms=>mtick(Math.max(4,Math.ceil((ms||0)/12)));
+function assert(c,m){ if(!c) throw new Error(m||'断言失败'); }
+function eq(a,b,m){ if(JSON.stringify(a)!==JSON.stringify(b)) throw new Error((m||'相等断言失败')+'\n期望: '+JSON.stringify(b)+'\n实际: '+JSON.stringify(a)); }
+async function waitFor(fn,t=5000){ const t0=Date.now(); while(Date.now()-t0<t){ try{ const r=await fn(); if(r) return r; }catch(e){} await mtick(4);} throw new Error('等待超时'); }
+
+async function bootApp(){
+  await new Promise(res=>{ frame.onload=res; frame.src='/index.html?test=1&r='+Date.now(); });
+  await waitFor(()=>frame.contentWindow.__app&&frame.contentWindow.__app.view&&frame.contentWindow.__app.view.children.length);
+  W=frame.contentWindow; D=frame.contentDocument;
+  W.confirm=()=>true; W.alert=()=>true;
+  // createObjectURL 同时被导出 JSON 和日记缩略图（PNG）使用，按 MIME 精确取备份 blob
+  const blobs=[];
+  W.URL.createObjectURL=blob=>{ blobs.push(blob); return 'blob:mock/'+Math.random(); };
+  W.URL.revokeObjectURL=()=>{};
+  bootApp.lastBlobText=async()=>await new Promise((res,rej)=>{ const b=blobs.slice().reverse().find(x=>x.type==='application/json')||blobs[blobs.length-1]; const r=new W.FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsText(b); });
+  bootApp.lastBlobOfType=async(mime)=>await new Promise((res,rej)=>{ const b=blobs.slice().reverse().find(x=>(x.type||'').indexOf(mime)===0); if(!b){rej(new Error('没有 '+mime+' 类型的 blob'));return;} const r=new W.FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsText(b); });
+}
+async function reset(){ await W.__app.reset(); await sleep(50); }
+async function go(v){ W.__app.go(v); await sleep(55); }
+function q(sel){ return D.querySelector(sel); }
+function qa(sel){ return Array.from(D.querySelectorAll(sel)); }
+function clickAct(act,idx){ const els=qa('[data-act="'+act+'"]'); const el=els[idx||0]; assert(el,'找不到按钮 data-act='+act+'(idx '+(idx||0)+')'); el.click(); return el; }
+async function waitModal(){ await waitFor(()=>D.querySelector('.mask')); }
+async function fillModal(map){
+  await waitModal();
+  for(const k of Object.keys(map)){
+    const el=D.querySelector('.mask [data-key="'+k+'"]');
+    assert(el,'弹窗中找不到字段 '+k);
+    el.value=map[k];
+    el.dispatchEvent(new W.Event('input',{bubbles:true}));
+    el.dispatchEvent(new W.Event('change',{bubbles:true}));
+  }
+}
+async function okModal(){ D.querySelector('#mok').click(); await sleep(90); }
+async function cancelModal(){ D.querySelector('#mcancel').click(); await sleep(50); }
+function toastText(){ return D.querySelector('#toast').textContent; }
+function viewText(){ return W.__app.view.textContent; }
+function tplText(){ const m=D.querySelector('#tplMask'); return m?m.textContent:''; }
+
+/* ================= 分组注册与执行 ================= */
+const groups=[];
+function group(name,tests){ groups.push({name,tests}); }
+
+async function run(){
+  await bootApp();
+  const m=/[?&]grp=([^&]+)/.exec(location.search);
+  const grpFilter=m?decodeURIComponent(m[1]):'';
+  const runGroups=grpFilter?groups.filter(g=>g.name.indexOf(grpFilter)>=0):groups;
+  for(const g of runGroups){
+    const box=document.createElement('div'); box.className='grp';
+    box.innerHTML='<h3>'+g.name+'</h3>'; results.appendChild(box);
+    for(const [name,fn] of g.tests){
+      const row=document.createElement('div'); row.className='t';
+      try{ await fn(); passed++; row.classList.add('pass'); row.innerHTML='<span class="tag">PASS</span><span>'+name+'</span>'; }
+      catch(e){ failed++; row.classList.add('fail'); row.innerHTML='<span class="tag">FAIL</span><div><div>'+name+'</div><div class="msg">'+String(e.message||e).replace(/</g,'&lt;')+'</div></div>'; }
+      box.appendChild(row);
+      document.getElementById('counts').textContent='通过 '+passed+' / 失败 '+failed;
+      await sleep(10);
+    }
+  }
+  document.getElementById('runstate').textContent= failed? ('完成：'+failed+' 个失败') : '全部通过 ✅';
+  document.getElementById('runstate').style.color= failed?'#ff8085':'#7ff0b0';
+  document.title='TESTS '+(failed?('FAIL '+failed):'ALL PASS')+' ('+(passed+failed)+')';
+  window.__summary={passed,failed,done:true};
+  document.body.dataset.done='1';
+}
+
+/* ================================================================
+   阶段二：健壮性与体验优化
+================================================================ */
+group('阶段二 2.1 数据版本迁移与加载',[
+  ['migrate 接受当前版本数据并保持版本号',async()=>{
+    const s=W.__app.defaultState();
+    const m=W.__app.migrate(JSON.parse(JSON.stringify(s)));
+    eq(m.v,2,'默认数据版本应为 2');
+    assert(Array.isArray(m.taskTemplates),'应含任务模板库字段');
+  }],
+  ['migrate 拒绝缺少版本号的数据',async()=>{
+    let e=''; try{ W.__app.migrate({settings:{}}); }catch(x){e=x.message;}
+    assert(/版本号/.test(e),'应提示缺少版本号，实际：'+e);
+  }],
+  ['migrate 拒绝更新版本的备份',async()=>{
+    let e=''; try{ W.__app.migrate({v:99}); }catch(x){e=x.message;}
+    assert(/更新/.test(e),'应提示版本更新，实际：'+e);
+  }],
+  ['migrate 拒绝 null 和 v=0',async()=>{
+    assert(()=>{try{W.__app.migrate(null);return false;}catch(e){return true;}});
+    let e=''; try{ W.__app.migrate({v:0}); }catch(x){e=x.message;}
+    assert(/不受支持/.test(e),'实际：'+e);
+  }],
+  ['parseBackup 拒绝空字符串、非 JSON、结构残缺',async()=>{
+    const bads=['','   ','not json','{"v":1}','{"v":1,"settings":{}}'];
+    for(const t of bads){ let e=''; try{ W.__app.parseBackup(t); }catch(x){e=x.message;} assert(e,'应拒绝：'+JSON.stringify(t)); }
+  }],
+  ['parseBackup 接受完整备份',async()=>{
+    const s=W.__app.defaultState(); s.quickNotes=[{id:'a',text:'x'}];
+    const m=W.__app.parseBackup(JSON.stringify(s));
+    eq(m.quickNotes.length,1,'应解析出备忘');
+  }],
+  ['本地存储损坏时自动回退初始数据且能启动',async()=>{
+    W.localStorage.setItem('lifeapp_v1','{这不是合法JSON');
+    await bootApp();
+    assert(W.__app.view.children.length>0,'首页应正常渲染');
+    assert(/已完成/.test(viewText()),'首页摘要应存在');
+    await reset();
+  }]
+]);
+
+group('阶段二 2.2 弹窗键盘交互',[
+  ['任务弹窗按 Escape 关闭且不产生数据',async()=>{
+    await reset(); await go('plan');
+    clickAct('task-add'); await waitModal();
+    D.dispatchEvent(new W.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+    await sleep(60);
+    assert(!D.querySelector('.mask'),'弹窗应已关闭');
+    eq(W.__app.state.tasks[W.__app.today()]||[], [], '不应产生任务');
+  }],
+  ['弹窗表单提交（回车等价路径）创建任务',async()=>{
+    await go('plan');
+    clickAct('task-add'); await waitModal();
+    await fillModal({text:'键盘创建的任务',pri:'高'});
+    D.querySelector('#mform').requestSubmit();
+    await sleep(80);
+    assert(!D.querySelector('.mask'),'提交后弹窗应关闭');
+    const list=W.__app.tasksOf(W.__app.today());
+    eq(list.length,1,'应有 1 条任务');
+    eq(list[0].text,'键盘创建的任务'); eq(list[0].pri,'高');
+  }],
+  ['必填项为空时阻止提交并提示',async()=>{
+    clickAct('task-add'); await waitModal();
+    await fillModal({text:'   '});
+    D.querySelector('#mform').requestSubmit();
+    await sleep(60);
+    assert(D.querySelector('.mask'),'弹窗应保留');
+    assert(/请填写/.test(toastText()),'应提示必填，实际：'+toastText());
+    D.querySelector('#mcancel').click(); await sleep(40);
+  }],
+  ['点遮罩空白处关闭弹窗',async()=>{
+    clickAct('task-add'); await waitModal();
+    D.querySelector('.mask').dispatchEvent(new W.MouseEvent('click',{bubbles:true}));
+    await sleep(50);
+    assert(!D.querySelector('.mask'),'弹窗应关闭');
+  }]
+]);
+
+group('阶段二 2.3 空状态与异常边界',[
+  ['初始空数据下 9 个视图均无 NaN/undefined',async()=>{
+    await reset();
+    const bad=/NaN|undefined|Invalid Date|null/;
+    const routes=['home','plan','media','meditation','diary','fitness','diet','games','settings'];
+    for(const r of routes){ await go(r); assert(!bad.test(viewText()), r+' 出现异常文本'); }
+  }],
+  ['各模块二级标签页空状态正常',async()=>{
+    const steps=[
+      ['media',()=>{W.__app.ui.mediaTab='ideas';}],['meditation',()=>{}],
+      ['diary',()=>{W.__app.ui.diaryTab='habits';}],
+      ['fitness',()=>{W.__app.ui.fitTab='log';}],['fitness',()=>{W.__app.ui.fitTab='weight';}],
+      ['diet',()=>{W.__app.ui.dietTab='foods';}],['games',()=>{W.__app.ui.gameTab='sessions';}]
+    ];
+    for(const [r,prep] of steps){ prep(); await go(r); assert(!/NaN|undefined|Invalid Date/.test(viewText()), r+' 空状态异常'); }
+  }],
+  ['删除最后一个习惯后首页与习惯页正常',async()=>{
+    await reset();
+    W.__app.state.habits.push({id:'h1',name:'测试习惯',checks:[W.__app.today()]}); W.__app.save();
+    await go('home'); assert(/1\/1/.test(viewText()),'应显示 1/1');
+    W.__app.ui.diaryTab='habits'; await go('diary');
+    clickAct('habit-del'); await sleep(50);
+    eq(W.__app.state.habits.length,0);
+    await go('home'); assert(!/NaN|undefined/.test(viewText()));
+    W.__app.ui.diaryTab='habits'; await go('diary');
+    assert(/还没有习惯/.test(viewText()),'应显示习惯空状态');
+  }],
+  ['删除最后一个食物后食物库显示空状态',async()=>{
+    await reset();
+    W.__app.state.diet.foods=[]; W.__app.save();
+    W.__app.ui.dietTab='foods'; await go('diet');
+    assert(/食物库是空的/.test(viewText()));
+    assert(!/NaN|undefined/.test(viewText()));
+  }],
+  ['删除游戏后其历史时长记录显示占位而非报错',async()=>{
+    await reset();
+    const st=W.__app.state;
+    st.games.list.push({id:'g1',name:'某游戏',status:'done',rating:0,note:''});
+    st.games.sessions.push({id:'s1',gid:'g1',date:W.__app.today(),minutes:30});
+    W.__app.save();
+    W.__app.ui.gameTab='list';
+    await go('games');
+    qa('[data-act="game-del"]')[0].click(); await sleep(50);
+    W.__app.ui.gameTab='sessions'; await go('games');
+    assert(/已删除的游戏/.test(viewText()),'应显示已删除占位');
+    assert(!/NaN|undefined/.test(viewText()));
+  }],
+  ['清空数据后预置食物恢复为 8 种',async()=>{
+    const st=W.__app.state; st.quickNotes.push({id:'x',text:'y',t:1,d:W.__app.today()}); W.__app.save();
+    await W.__app.reset(); await sleep(20);
+    eq(W.__app.state.diet.foods.length,8);
+    eq(W.__app.state.quickNotes.length,0);
+  }]
+]);
+
+group('阶段二 2.4 日期边界',[
+  ['跨年加减日期',async()=>{
+    const A=W.__app;
+    eq(A.addDays('2024-12-31',1),'2025-01-01');
+    eq(A.addDays('2025-01-01',-1),'2024-12-31');
+    eq(A.addDays('2025-12-31',1),'2026-01-01');
+  }],
+  ['闰年 2 月',async()=>{
+    const A=W.__app;
+    eq(A.addDays('2024-02-28',1),'2024-02-29','2024 是闰年');
+    eq(A.addDays('2024-02-29',1),'2024-03-01');
+    eq(A.addDays('2023-02-28',1),'2023-03-01','2023 不是闰年');
+    eq(A.addDays('2020-02-28',2),'2020-03-01');
+  }],
+  ['周一为一周起点的周起始日',async()=>{
+    W.__app.state.settings.weekStart=1; W.__app.save();
+    eq(W.__app.weekStartOf('2026-09-13'),'2026-09-07','周日应回到上周一');
+    eq(W.__app.weekStartOf('2026-09-07'),'2026-09-07','周一即本周起点');
+    eq(W.__app.weekStartOf('2026-09-12'),'2026-09-07','周六回到周一');
+  }],
+  ['周日为一周起点的周起始日',async()=>{
+    W.__app.state.settings.weekStart=0; W.__app.save();
+    eq(W.__app.weekStartOf('2026-09-13'),'2026-09-13','周日即起点');
+    eq(W.__app.weekStartOf('2026-09-12'),'2026-09-06','周六回到周日');
+    W.__app.state.settings.weekStart=1; W.__app.save();
+  }],
+  ['界面上连续翻页日期始终有效',async()=>{
+    await reset(); await go('plan');
+    for(let i=0;i<400;i++) clickAct('plan-prev');
+    await sleep(30);
+    assert(!/Invalid|undefined|NaN/.test(viewText()),'往前翻 400 天出现异常');
+    for(let i=0;i<800;i++) clickAct('plan-next');
+    await sleep(30);
+    assert(!/Invalid|undefined|NaN/.test(viewText()),'往后翻 800 天出现异常');
+    clickAct('plan-today');
+  }]
+]);
+
+group('阶段二 2.5 备份导入校验',[
+  ['备份导入大小上限为 50MB（v5.1 起含图片备份）',async()=>{
+    eq(W.__app.state.v,2);
+    const input=D.querySelector('input[type=file]');
+    assert(input&&/json/.test(input.accept),'备份文件选择器应存在且接受 json');
+    // 超 50MB：真实派发 change，应被立即拒绝且不读文件
+    const big=new W.File(['x'.repeat(50*1024*1024+10)],'big.json',{type:'application/json'});
+    const dt=new W.DataTransfer(); dt.items.add(big);
+    input.files=dt.files;
+    input.dispatchEvent(new W.Event('change',{bubbles:true}));
+    await sleep(120);
+    assert(/超过 50MB/.test(toastText()),'应提示超过 50MB，实际：'+toastText());
+  }],
+  ['导入损坏文件：提示失败且原数据不变',async()=>{
+    await reset();
+    W.__app.state.quickNotes.push({id:'keep',text:'保留数据',t:1,d:W.__app.today()}); W.__app.save();
+    const input=D.querySelector('input[type=file]');
+    const dt=new W.DataTransfer();
+    dt.items.add(new W.File(['这不是JSON'],'bad.json',{type:'application/json'}));
+    input.files=dt.files;
+    input.dispatchEvent(new W.Event('change',{bubbles:true}));
+    await waitFor(()=>/导入失败/.test(toastText()),4000);
+    assert(/导入失败/.test(toastText()),'应提示导入失败，实际：'+toastText());
+    eq(W.__app.state.quickNotes.length,1,'原数据不应变化');
+  }],
+  ['导入结构错误的 JSON：拒绝',async()=>{
+    const input=D.querySelector('input[type=file]');
+    const dt=new W.DataTransfer();
+    dt.items.add(new W.File([JSON.stringify({v:1,hello:1})],'wrong.json',{type:'application/json'}));
+    input.files=dt.files;
+    input.dispatchEvent(new W.Event('change',{bubbles:true}));
+    await waitFor(()=>/导入失败/.test(toastText()),4000);
+    assert(/导入失败/.test(toastText()),'应拒绝非本应用备份');
+    eq(W.__app.state.quickNotes.length,1,'原数据不应变化');
+  }],
+  ['导入合法备份：数据被替换',async()=>{
+    const fresh=W.__app.defaultState();
+    fresh.settings.name='导入的人';
+    fresh.quickNotes.push({id:'n1',text:'来自备份',t:2,d:W.__app.today()});
+    const input=D.querySelector('input[type=file]');
+    const dt=new W.DataTransfer();
+    dt.items.add(new W.File([JSON.stringify(fresh)],'ok.json',{type:'application/json'}));
+    input.files=dt.files;
+    input.dispatchEvent(new W.Event('change',{bubbles:true}));
+    await waitFor(()=>/已导入/.test(toastText()),4000);
+    assert(/已导入/.test(toastText()),'应提示成功，实际：'+toastText());
+    eq(W.__app.state.settings.name,'导入的人');
+    eq(W.__app.state.quickNotes.length,1);
+    eq(W.__app.state.quickNotes[0].text,'来自备份');
+  }]
+]);
+
+/* ================================================================
+   阶段三：功能增强
+================================================================ */
+group('阶段三 3.1 重复任务模板',[
+  ['新建模板并保存到模板库',async()=>{
+    await reset(); await go('plan');
+    clickAct('tpl-open'); await waitFor(()=>D.querySelector('#tplMask'));
+    assert(/还没有模板/.test(tplText()),'面板应显示空状态');
+    D.querySelector('#tplText').value='晨跑 3 公里';
+    D.querySelector('#tplTime').value='07:00';
+    D.querySelector('#tplPri').value='高';
+    clickAct('tpl-add'); await sleep(70);
+    eq(W.__app.state.taskTemplates.length,1);
+    const t=W.__app.state.taskTemplates[0];
+    eq(t.text,'晨跑 3 公里'); eq(t.time,'07:00'); eq(t.pri,'高');
+    assert(tplText().includes('晨跑 3 公里'),'面板应显示模板');
+  }],
+  ['模板内容为空时阻止新建',async()=>{
+    D.querySelector('#tplText').value='   ';
+    clickAct('tpl-add'); await sleep(50);
+    eq(W.__app.state.taskTemplates.length,1,'不应新增');
+    assert(/先输入/.test(toastText()));
+    D.querySelector('#tplText').value='喝水';
+  }],
+  ['一键应用模板到今天，生成独立任务且模板保留',async()=>{
+    clickAct('tpl-apply'); await sleep(70);
+    const list=W.__app.tasksOf(W.__app.today());
+    eq(list.length,1,'今日应有 1 条任务');
+    eq(list[0].text,'晨跑 3 公里'); eq(list[0].time,'07:00'); eq(list[0].pri,'高');
+    eq(list[0].done,false);
+    eq(W.__app.state.taskTemplates.length,1,'模板本身不应消失');
+    assert(list[0].id!==W.__app.state.taskTemplates[0].id,'任务与模板 id 应不同');
+  }],
+  ['可把模板应用到其它日期（明天）',async()=>{
+    W.__app.ui.planDate=W.__app.addDays(W.__app.today(),1);
+    await go('plan'); await waitFor(()=>D.querySelector('#tplMask'));
+    clickAct('tpl-apply'); await sleep(70);
+    eq(W.__app.tasksOf(W.__app.addDays(W.__app.today(),1)).length,1,'明天应有任务');
+  }],
+  ['删除模板',async()=>{
+    W.__app.ui.planDate=W.__app.today(); await go('plan');
+    await waitFor(()=>D.querySelector('#tplMask'));
+    clickAct('tpl-del'); await sleep(60);
+    eq(W.__app.state.taskTemplates.length,0);
+    clickAct('tpl-close'); await sleep(50);
+    assert(!D.querySelector('#tplMask'),'面板应关闭');
+  }]
+]);
+
+group('阶段三 3.2 饮食按餐次分组',[
+  ['添加餐饮弹窗含餐次选择，默认值为四餐之一',async()=>{
+    await reset();
+    W.__app.ui.dietTab='today'; await go('diet');
+    clickAct('meal-add'); await waitModal();
+    const sel=D.querySelector('.mask [data-key="mealType"]');
+    assert(sel,'应有餐次字段');
+    eq(Array.from(sel.options).map(o=>o.value),['早餐','午餐','晚餐','加餐']);
+    assert(['早餐','午餐','晚餐','加餐'].includes(sel.value),'默认餐次合法：'+sel.value);
+    await cancelModal();
+  }],
+  ['按早/晚餐分组显示且分组小计正确',async()=>{
+    const fid=W.__app.state.diet.foods[0].id; // 米饭 174
+    clickAct('meal-add'); await waitModal();
+    await fillModal({mealType:'早餐',food:fid,n:1});
+    await okModal();
+    eq(W.__app.state.diet.meals[W.__app.today()].length,1,'第一餐应已写入');
+    clickAct('meal-add'); await waitModal();
+    await fillModal({mealType:'晚餐',food:'__custom',n:2,cname:'火锅',ckcal:500});
+    await okModal();
+    eq(W.__app.state.diet.meals[W.__app.today()].length,2,'第二餐应已写入');
+    const meals=W.__app.state.diet.meals[W.__app.today()];
+    eq(meals.map(m=>m.mealType),['早餐','晚餐'],'餐次应正确保存');
+    const txt=viewText();
+    assert(/早餐/.test(txt)&&/晚餐/.test(txt),'应显示早餐和晚餐分组，实际：'+txt.slice(0,200));
+    assert(/小计 174 千卡/.test(txt),'早餐小计 174');
+    assert(/小计 1000 千卡/.test(txt),'晚餐小计 1000');
+    assert(/合计 1174 千卡/.test(txt),'全天合计 1174');
+    assert(!/🍽 午餐/.test(txt),'不应出现空的午餐分组');
+    eq(W.__app.kcalOf(W.__app.today()),1174,'统计函数总量不受分组影响');
+  }],
+  ['无餐次的旧记录自动归入午餐组',async()=>{
+    const t=W.__app.today();
+    W.__app.state.diet.meals[t]=[{id:'old',name:'旧食物',kcal:123,n:1}];
+    W.__app.save(); await go('diet');
+    assert(/🍽 午餐/.test(viewText()),'旧记录应归入午餐');
+    assert(/小计 123 千卡/.test(viewText()));
+  }],
+  ['v1→v2 迁移补齐餐次/正文/模板字段',async()=>{
+    const raw=JSON.parse(JSON.stringify(W.__app.defaultState()));
+    raw.v=1;
+    raw.diet.meals['2026-01-01']=[{id:'m1',name:'x',kcal:100,n:1}];
+    raw.media.posts=[{id:'p1',title:'旧文'}];
+    delete raw.taskTemplates;
+    const m=W.__app.migrate(raw);
+    eq(m.v,2);
+    eq(m.diet.meals['2026-01-01'][0].mealType,'午餐');
+    eq(m.media.posts[0].content,'');
+    assert(Array.isArray(m.taskTemplates));
+  }]
+]);
+
+group('阶段三 3.3 冥想计时后台恢复',[
+  ['离开冥想页后回来，计时从起始时间继续',async()=>{
+    await reset();
+    W.sessionStorage.setItem('lifeapp_med_timer',String(Date.now()-90000));
+    await go('meditation');
+    await sleep(60);
+    assert(/01:3[0-9]/.test(D.querySelector('#mt').textContent),'应显示约 01:30，实际：'+D.querySelector('#mt').textContent);
+    assert(D.querySelector('#medStartBtn').classList.contains('d-none'),'开始按钮应隐藏');
+    assert(!D.querySelector('#medStopBtn').classList.contains('d-none'),'结束按钮应显示');
+  }],
+  ['切到别的页面再切回仍在计时',async()=>{
+    await go('home'); await go('meditation'); await sleep(60);
+    assert(W.sessionStorage.getItem('lifeapp_med_timer'),'起始时间应保留');
+    assert(/01:3[0-9]|01:4[0-9]/.test(D.querySelector('#mt').textContent));
+  }],
+  ['放弃后清除计时状态并复位按钮',async()=>{
+    clickAct('med-cancel'); await sleep(70);
+    eq(W.sessionStorage.getItem('lifeapp_med_timer'),null);
+    assert(!D.querySelector('#medStartBtn').classList.contains('d-none'),'开始按钮应恢复');
+  }],
+  ['点开始会持久化起始时间',async()=>{
+    clickAct('med-start'); await sleep(60);
+    assert(Number(W.sessionStorage.getItem('lifeapp_med_timer'))>0);
+    clickAct('med-cancel'); await sleep(50);
+  }],
+  ['结束并记录：按实际经过时长写入并清除计时',async()=>{
+    W.sessionStorage.setItem('lifeapp_med_timer',String(Date.now()-90000));
+    await go('meditation'); await sleep(60);
+    clickAct('med-stop'); await waitModal();
+    const mins=D.querySelector('.mask [data-key="minutes"]').value;
+    assert(Number(mins)>=1&&Number(mins)<=3,'默认时长应约 2 分钟，实际：'+mins);
+    await fillModal({note:'平静'}); await okModal();
+    eq(W.sessionStorage.getItem('lifeapp_med_timer'),null);
+    const rec=W.__app.state.meditation.filter(x=>x.date===W.__app.today());
+    eq(rec.length,1);
+    eq(rec[0].note,'平静');
+    assert(rec[0].minutes>=1);
+  }]
+]);
+
+group('阶段三 3.4 自媒体草稿正文',[
+  ['新建内容可写正文并保存、看板显示预览',async()=>{
+    await reset();
+    W.__app.ui.mediaTab='board'; await go('media');
+    clickAct('post-add'); await waitModal();
+    assert(D.querySelector('.mask [data-key="content"]'),'弹窗应有正文域');
+    const long='正文开头很重要，要抓住读者眼球，这里写一段比较长的内容用于验证超过 80 字时卡片预览会被截断并显示省略号标记加油加油加油加油加油加油加油加油加油加油加油加油加油加油加油';
+    await fillModal({title:'带正文的稿',content:long});
+    await okModal();
+    const p=W.__app.state.media.posts[0];
+    eq(p.content,long,'正文应完整保存');
+    assert(p.content.length>80);
+    const txt=viewText();
+    assert(txt.includes('正文开头很重要'),'卡片应显示正文预览');
+    assert(/…/.test(txt),'超长正文应出现省略号');
+  }],
+  ['编辑内容能回填并修改正文',async()=>{
+    clickAct('post-edit'); await waitModal();
+    eq(D.querySelector('.mask [data-key="content"]').value.slice(0,7),'正文开头很重要');
+    await fillModal({content:'改过的正文'}); await okModal();
+    eq(W.__app.state.media.posts[0].content,'改过的正文');
+    assert(viewText().includes('改过的正文'));
+  }],
+  ['灵感转入草稿带空正文字段',async()=>{
+    await reset();
+    W.__app.state.media.ideas.push({id:'i1',text:'一个灵感',platform:'B站',d:W.__app.today()}); W.__app.save();
+    W.__app.ui.mediaTab='ideas'; await go('media');
+    clickAct('idea-to'); await sleep(70);
+    eq(W.__app.state.media.posts.length,1);
+    eq(W.__app.state.media.posts[0].content,'');
+  }]
+]);
+
+group('阶段三 3.5 日记历史日历',[
+  ['有日记的日期在月历中高亮',async()=>{
+    await reset();
+    W.__app.ui.diaryTab='diary';
+    const ym=W.__app.today().slice(0,7);
+    W.__app.state.diary[ym+'-05']={text:'五号的日记',mood:'开心'};
+    W.__app.state.diary[ym+'-20']={text:'',mood:'平静'};
+    W.__app.save();
+    await go('diary');
+    eq(D.querySelectorAll('.dcal.has').length,2,'应有 2 个高亮日');
+    assert(D.querySelector('.dcal.td'),'今天应有标记');
+  }],
+  ['点击日历日期跳转到对应那一天',async()=>{
+    const d=W.__app.today().slice(0,7)+'-05';
+    D.querySelector('.dcal[data-d="'+d+'"]').click(); await sleep(70);
+    eq(W.__app.ui.diaryDate,d);
+    const ta=D.querySelector('#diaryText');
+    assert(ta&&ta.value.includes('五号的日记'),'应显示该天日记内容');
+    assert(D.querySelector('.dcal.sel[data-d="'+d+'"]'),'该天应为选中态');
+  }],
+  ['月历可跨月/跨年翻页',async()=>{
+    W.__app.ui.diaryDate='2026-01-15'; W.__app.ui.calYM=''; await go('diary');
+    assert(/2026 年 1 月/.test(viewText()));
+    clickAct('cal-prev'); await sleep(50);
+    assert(/2025 年 12 月/.test(viewText()),'上一月应跨年到 2025-12');
+    clickAct('cal-next'); clickAct('cal-next'); await sleep(50);
+    assert(/2026 年 2 月/.test(viewText()));
+  }]
+]);
+
+group('阶段三 3.6 训练记录复制为今天',[
+  ['复制历史训练：新记录属于今天、动作一致但 id 不同、原记录保留',async()=>{
+    await reset();
+    const yd=W.__app.addDays(W.__app.today(),-1);
+    W.__app.state.fitness.logs.push({id:'oldlog',date:yd,name:'推胸日',ex:[
+      {name:'卧推',sets:4,reps:10,weight:60},{name:'夹胸',sets:3,reps:15,weight:20}
+    ]});
+    W.__app.save();
+    W.__app.ui.fitTab='log'; await go('fitness');
+    clickAct('log-copy'); await sleep(70);
+    eq(W.__app.state.fitness.logs.length,2);
+    const nw=W.__app.state.fitness.logs.find(x=>x.date===W.__app.today());
+    const old=W.__app.state.fitness.logs.find(x=>x.id==='oldlog');
+    assert(nw,'应存在今天的新记录');
+    eq(nw.id!=='oldlog',true);
+    eq(nw.name,'推胸日');
+    eq(nw.ex.length,2);
+    eq(nw.ex[0],{name:'卧推',sets:4,reps:10,weight:60});
+    eq(old.date,yd,'原记录日期不变');
+    nw.ex[0].sets=99;
+    eq(old.ex[0].sets,4,'动作应是深拷贝，互不影响');
+    assert(/已复制为今天/.test(toastText()));
+  }],
+  ['没有动作的训练也能复制',async()=>{
+    await reset();
+    W.__app.state.fitness.logs.push({id:'l2',date:'2026-01-01',name:'空训练',ex:[]}); W.__app.save();
+    W.__app.ui.fitTab='log'; await go('fitness');
+    clickAct('log-copy'); await sleep(70);
+    const nw=W.__app.state.fitness.logs.find(x=>x.date===W.__app.today());
+    assert(nw&&nw.name==='空训练');
+    assert(Array.isArray(nw.ex)&&nw.ex.length===0);
+  }]
+]);
+
+/* ================================================================
+   阶段四：数据分析
+================================================================ */
+group('阶段四 4.1 习惯月度热力图',[
+  ['无习惯时显示引导提示且不报错',async()=>{
+    await reset();
+    W.__app.ui.diaryTab='habits'; await go('diary');
+    assert(/打卡热力图/.test(viewText()),'应有热力图卡片');
+    assert(/还没有习惯/.test(viewText()),'应有引导提示');
+    assert(!/NaN|undefined/.test(viewText()));
+  }],
+  ['按完成比例分色：全部完成 l4、完成一半 l2、未打卡 l0',async()=>{
+    await reset();
+    const ym=W.__app.today().slice(0,7);
+    W.__app.state.habits=[
+      {id:'h1',name:'习惯一',checks:[ym+'-05',ym+'-10']},
+      {id:'h2',name:'习惯二',checks:[ym+'-05']}
+    ];
+    W.__app.save();
+    W.__app.ui.diaryTab='habits'; W.__app.ui.habYM=''; await go('diary');
+    const c5=D.querySelector('.hcell[title^="'+ym+'-05"]');
+    const c10=D.querySelector('.hcell[title^="'+ym+'-10"]');
+    const c8=D.querySelector('.hcell[title^="'+ym+'-08"]');
+    assert(c5&&c5.classList.contains('l4'),'5号两习惯全完成应为 l4');
+    assert(/完成 2\/2/.test(c5.title),'title 应显示 2/2');
+    assert(c10&&c10.classList.contains('l2'),'10号完成 1/2 应为 l2');
+    assert(c8&&c8.classList.contains('l0'),'8号未打卡应为 l0');
+    assert(/有打卡的日期 2 天/.test(viewText()),'应统计 2 个有打卡日期');
+    assert(/全部习惯完成 1 天/.test(viewText()),'应统计 1 个全勤日');
+  }],
+  ['热力图可跨月翻页并回到本月',async()=>{
+    W.__app.ui.habYM='2026-02'; await go('diary');
+    assert(/2026 年 2 月打卡热力图/.test(viewText()));
+    let feb=D.querySelectorAll('.heatgrid .hcell:not(.blank)').length;
+    eq(feb,28,'2026年2月应有28个日期格');
+    clickAct('heat-prev'); await sleep(50);
+    assert(/2026 年 1 月/.test(viewText()));
+    clickAct('heat-next'); await sleep(50);
+    assert(/2026 年 2 月/.test(viewText()));
+    clickAct('heat-today'); await sleep(50);
+    const ym=W.__app.today().slice(0,7);
+    assert(viewText().includes(Number(ym.slice(0,4))+' 年 '+Number(ym.slice(5,7))+' 月'),'应回到本月');
+  }],
+  ['打卡后热力图实时更新',async()=>{
+    await reset();
+    const ym=W.__app.today().slice(0,7), t=W.__app.today();
+    W.__app.state.habits=[{id:'h1',name:'新习惯',checks:[]}]; W.__app.save();
+    W.__app.ui.diaryTab='habits'; await go('diary');
+    // 通过最近7天圆点打卡今天
+    D.querySelector('.dot[data-date="'+t+'"]').click(); await sleep(60);
+    const ct=D.querySelector('.hcell[title^="'+t+'"]');
+    assert(ct.classList.contains('l4'),'唯一习惯打卡后今天应 l4');
+  }]
+]);
+
+group('阶段四 4.2 饮食热量周趋势',[
+  ['近7天合计、日均、达标天数正确',async()=>{
+    await reset();
+    const A=W.__app, t=A.today(), goal=A.state.settings.calorieGoal; // 2000
+    const put=(off,kcal)=>{A.state.diet.meals[A.addDays(t,off)]=[{id:'x'+off,name:'x',kcal,n:1,mealType:'午餐'}];
+      const m=A.state.diet.meals[A.addDays(t,off)][0]; m.kcal=kcal;};
+    put(-6,1500); put(-3,1800); put(-1,2500);
+    A.save();
+    A.ui.dietTab='trend'; await go('diet');
+    const txt=viewText();
+    assert(/近 7 天合计/.test(txt));
+    assert(/5800/.test(txt),'合计应为 5800');
+    assert(/1933/.test(txt),'有记录日均应为 1933');
+    assert(/超 1 天/.test(txt),'应有 1 天超标');
+  }],
+  ['折线含 7 个数据点、目标虚线与超标红点',async()=>{
+    const circles=D.querySelectorAll('svg circle');
+    eq(circles.length,7,'应有 7 个折点');
+    const goalLine=D.querySelector('svg line[stroke-dasharray]');
+    assert(goalLine,'应有目标虚线');
+    assert(/目标 2000/.test(D.querySelector('svg').textContent),'虚线标签应含目标值');
+    const red=D.querySelectorAll('svg circle[fill="var(--danger)"]');
+    eq(red.length,1,'应有 1 个超标红点');
+    assert(/每日明细/.test(viewText()));
+  }],
+  ['修改热量目标后目标线随之变化',async()=>{
+    W.__app.state.settings.calorieGoal=1500; W.__app.save();
+    await go('diet');
+    assert(/目标 1500/.test(D.querySelector('svg').textContent));
+    const red=D.querySelectorAll('svg circle[fill="var(--danger)"]');
+    eq(red.length,2,'1500 与 1800、2500 超标，应 2 个红点');
+  }],
+  ['完全无记录时趋势页正常显示（全 0 折线）',async()=>{
+    await reset();
+    W.__app.ui.dietTab='trend'; await go('diet');
+    eq(D.querySelectorAll('svg circle').length,7);
+    assert(/近 7 天合计（千卡）/.test(viewText()));
+    assert(!/NaN|undefined/.test(viewText()));
+  }]
+]);
+
+group('阶段四 4.3 冥想时长趋势',[
+  ['近30天聚合：总分钟数与练习天数正确，折线 30 点',async()=>{
+    await reset();
+    const t=W.__app.today();
+    W.__app.state.meditation=[
+      {id:'m1',date:W.__app.addDays(t,-1),minutes:10,note:''},
+      {id:'m2',date:W.__app.addDays(t,-1),minutes:5,note:''},
+      {id:'m3',date:W.__app.addDays(t,-3),minutes:20,note:''}
+    ];
+    W.__app.save();
+    await go('meditation');
+    assert(/近 30 天冥想趋势/.test(viewText()));
+    assert(/共 35 分钟/.test(viewText()),'同一天两条应聚合，合计 35');
+    assert(/2 天有练习/.test(viewText()));
+    eq(D.querySelectorAll('svg circle').length,30,'应有 30 个折点');
+  }],
+  ['无冥想记录时显示 30 天平线而非空状态',async()=>{
+    await reset(); await go('meditation');
+    eq(D.querySelectorAll('svg circle').length,30);
+    assert(/共 0 分钟/.test(viewText()));
+  }]
+]);
+
+group('阶段四 4.4 娱乐时长周报告',[
+  ['本周每天柱状、总计、活跃天数、环比上周',async()=>{
+    await reset();
+    W.__app.state.settings.weekStart=1; W.__app.save();
+    const A=W.__app, ws=A.weekStartOf(A.today());
+    W.__app.state.games.list.push({id:'g1',name:'游戏',status:'playing',rating:0,note:''});
+    W.__app.state.games.sessions=[
+      {id:'s1',gid:'g1',date:ws,minutes:60},
+      {id:'s2',gid:'g1',date:A.addDays(ws,2),minutes:30},
+      {id:'s3',gid:'g1',date:A.addDays(ws,-7),minutes:100}
+    ];
+    W.__app.save();
+    W.__app.ui.gameTab='report'; await go('games');
+    const txt=viewText();
+    assert(/本周娱乐总时长/.test(txt));
+    const nums=Array.from(D.querySelectorAll('.bwnum')).map(e=>e.textContent);
+    assert(nums.includes('60')&&nums.includes('30'),'柱子上应显示 60 和 30');
+    eq(nums.filter(x=>x).length,2,'本周应有 2 天有数值');
+    assert(/比上周少 10 分钟（-10%）/.test(txt),'环比文案应正确，实际：'+txt);
+    const cards=D.querySelectorAll('.card.stat .n');
+    eq(cards[0].textContent,'90','本周总计 90');
+    eq(cards[1].textContent,'2','活跃 2 天');
+    eq(cards[2].textContent,'-10','环比 -10');
+    assert(/上周 100/.test(txt));
+  }],
+  ['本周多娱乐时显示增加百分比',async()=>{
+    const A=W.__app, ws=A.weekStartOf(A.today());
+    A.state.games.sessions=[
+      {id:'a',gid:'g1',date:A.addDays(ws,1),minutes:200},
+      {id:'b',gid:'g1',date:A.addDays(ws,-6),minutes:100}
+    ];
+    A.save(); await go('games');
+    assert(/比上周多 100 分钟（\+100%）/.test(viewText()));
+  }],
+  ['两周均无记录时友好提示',async()=>{
+    await reset();
+    W.__app.ui.gameTab='report'; await go('games');
+    assert(/两周都还没有娱乐记录/.test(viewText()));
+    eq(D.querySelectorAll('.bwcol').length,7,'仍显示 7 根空柱');
+  }],
+  ['上周无记录、本周有时的文案',async()=>{
+    const A=W.__app, ws=A.weekStartOf(A.today());
+    A.state.games.list.push({id:'g2',name:'G',status:'playing',rating:0,note:''});
+    A.state.games.sessions=[{id:'c',gid:'g2',date:ws,minutes:45}];
+    A.save(); await go('games');
+    assert(/上周没有记录，本周已娱乐 45 分钟/.test(viewText()));
+  }]
+]);
+
+group('阶段四 4.5 自媒体发布数据看板',[
+  ['按平台汇总且只统计已发布内容',async()=>{
+    await reset();
+    const t=W.__app.today();
+    W.__app.state.media.posts=[
+      {id:'p1',title:'B站视频1',platform:'B站',status:'published',views:1000,likes:100,comments:10,d:t,content:'',url:''},
+      {id:'p2',title:'B站视频2',platform:'B站',status:'published',views:500,likes:50,comments:5,d:t,content:'',url:''},
+      {id:'p3',title:'抖音爆款',platform:'抖音',status:'published',views:4000,likes:800,comments:200,d:t,content:'',url:''},
+      {id:'p4',title:'草稿不应计入',platform:'B站',status:'draft',views:9999,likes:9999,comments:9999,d:t,content:'',url:''}
+    ];
+    W.__app.save();
+    W.__app.ui.mediaTab='stats'; await go('media');
+    const txt=viewText();
+    assert(/已发布内容/.test(txt));
+    const cards=D.querySelectorAll('.card.stat .n');
+    eq(cards[0].textContent,'3','已发布 3 篇');
+    eq(cards[1].textContent,'5500','总浏览 5500');
+    eq(cards[2].textContent,'950','总点赞 950');
+    eq(cards[3].textContent,'215','总评论 215');
+    // 平台行
+    const rows=Array.from(D.querySelectorAll('.tb tr')).map(r=>r.textContent.replace(/\s+/g,' '));
+    const b=rows.find(r=>r.includes('B站')), dy=rows.find(r=>r.includes('抖音'));
+    assert(/2/.test(b)&&/1500/.test(b),'B站行：2篇 1500浏览，实际：'+b);
+    assert(/4000/.test(dy),'抖音行：4000浏览');
+    assert(!txt.includes('9999'),'草稿数据绝不能混入');
+    // 互动率 (950+215)/5500=21.2%
+    assert(/21\.2%/.test(txt),'总互动率应 21.2%');
+  }],
+  ['Top5 按浏览量降序',async()=>{
+    const items=Array.from(D.querySelectorAll('.card .item .tx')).map(e=>e.textContent);
+    assert(items[0].includes('抖音爆款'),'浏览最高应排第一，实际：'+items[0]);
+  }],
+  ['无已发布内容时显示空状态',async()=>{
+    await reset();
+    W.__app.state.media.posts=[{id:'x',title:'草稿',platform:'B站',status:'draft',views:0,likes:0,comments:0,d:W.__app.today(),content:''}];
+    W.__app.save();
+    W.__app.ui.mediaTab='stats'; await go('media');
+    assert(/还没有「已发布」的内容/.test(viewText()));
+    assert(!/NaN|undefined/.test(viewText()));
+  }],
+  ['浏览为 0 时互动率显示 — 而不是 NaN',async()=>{
+    const t=W.__app.today();
+    W.__app.state.media.posts=[{id:'z',title:'零浏览',platform:'知乎',status:'published',views:0,likes:0,comments:0,d:t,content:''}];
+    W.__app.save(); await go('media');
+    assert(!/NaN/.test(viewText()));
+    assert(/0\.0%/.test(viewText()),'总互动率为 0.0%');
+  }]
+]);
+
+/* ================================================================
+   阶段五：可选扩展
+================================================================ */
+function pngBytes(){ // 标准 1x1 PNG
+  const b64='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  const bin=W.atob(b64); const a=new W.Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) a[i]=bin.charCodeAt(i);
+  return a;
+}
+const PNG_B64='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+group('阶段五 5.1 日记配图（IndexedDB）',[
+  ['IDB 存取/删除图片 Blob',async()=>{
+    await reset();
+    const blob=new W.Blob([pngBytes()],{type:'image/png'});
+    await W.__app.idbPut('k1',blob);
+    const got=await W.__app.idbGet('k1');
+    assert(got,'应能取出图片');
+    eq(got.type,'image/png'); eq(got.size,blob.size);
+    await W.__app.idbDel('k1');
+    eq(await W.__app.idbGet('k1'),null,'删除后应为 null');
+  }],
+  ['日记页有添加图片入口与隐藏图片选择器，初始无配图',async()=>{
+    await reset(); await go('diary');
+    assert(D.querySelector('[data-act="photo-add"]'),'应有添加图片按钮');
+    const photoInput=D.querySelector('input[accept="image/*"]');
+    assert(photoInput&&photoInput.multiple,'应有多选图片隐藏 input');
+    eq(D.querySelectorAll('.ph').length,0);
+    // 第一个 file input 必须仍是备份导入框（旧测试依赖）
+    assert(/json/.test(D.querySelector('input[type=file]').accept),'第一个 file input 是备份导入框');
+  }],
+  ['通过图片选择器添加后：IDB 有数据、日记条目关联、缩略图渲染',async()=>{
+    await reset(); await go('diary');
+    const t=W.__app.today();
+    const input=D.querySelector('input[accept="image/*"]');
+    const dt=new W.DataTransfer();
+    dt.items.add(new W.File([pngBytes()],'a.png',{type:'image/png'}));
+    input.files=dt.files;
+    input.dispatchEvent(new W.Event('change',{bubbles:true}));
+    await waitFor(()=>/已添加 1 张图片/.test(toastText()),3000);
+    const photos=W.__app.state.diary[t].photos;
+    eq(photos.length,1);
+    const got=await W.__app.idbGet(photos[0]);
+    assert(got&&got.type==='image/png','IDB 中应存在该图');
+    await waitFor(()=>D.querySelector('.phimg img'),2000);
+    assert(D.querySelector('.phdel'),'应显示删除按钮');
+  }],
+  ['非图片文件与超过 8MB 的图片被跳过',async()=>{
+    await reset(); await go('diary');
+    const t=W.__app.today();
+    const input=D.querySelector('input[accept="image/*"]');
+    const dt=new W.DataTransfer();
+    dt.items.add(new W.File(['plain text'],'a.txt',{type:'text/plain'}));
+    dt.items.add(new W.File([new W.Uint8Array(8*1024*1024+8)],'big.png',{type:'image/png'}));
+    input.files=dt.files;
+    input.dispatchEvent(new W.Event('change',{bubbles:true}));
+    await waitFor(()=>/2 张图片被跳过/.test(toastText()),3000);
+    assert(!W.__app.state.diary[t],'不应创建日记条目');
+  }],
+  ['删除配图：从条目与 IDB 中同时移除，空条目被清理',async()=>{
+    await reset(); await go('diary');
+    const t=W.__app.today();
+    await W.__app.idbPut('d1',new W.Blob([pngBytes()],{type:'image/png'}));
+    W.__app.state.diary[t]={text:'',mood:'',photos:['d1']}; W.__app.save();
+    await go('diary');
+    await waitFor(()=>D.querySelector('.phdel'));
+    D.querySelector('.phdel').click();
+    await sleep(500); // delConfirm 回调内 await idbDel 后才清理条目
+    eq(await W.__app.idbGet('d1'),null,'IDB 中图片应删除');
+    assert(!W.__app.state.diary[t],'无文字无心情时条目应被删除');
+    eq(D.querySelectorAll('.ph').length,0);
+  }],
+  ['只有图片没有文字时日记条目保留（自动保存不会误删）',async()=>{
+    const t=W.__app.today();
+    await W.__app.idbPut('d2',new W.Blob([pngBytes()],{type:'image/png'}));
+    W.__app.state.diary[t]={text:'',mood:'',photos:['d2']}; W.__app.save();
+    await go('diary');
+    const ta=D.querySelector('#diaryText');
+    ta.value=''; ta.dispatchEvent(new W.Event('input',{bubbles:true}));
+    await rsleep(450); // 日记自动保存为 350ms 真实防抖，必须用墙钟等待
+    assert(W.__app.state.diary[t]&&W.__app.state.diary[t].photos.length===1,'图片条目必须保留');
+  }],
+  ['导出备份：图片打包为 _images(dataURL)，且不进 localStorage',async()=>{
+    await reset();
+    const t=W.__app.today();
+    await W.__app.idbPut('e1',new W.Blob([pngBytes()],{type:'image/png'}));
+    W.__app.state.diary[t]={text:'带图',mood:'',photos:['e1']}; W.__app.save();
+    await go('settings');
+    clickAct('export-data');
+    let txt='';
+    await waitFor(async()=>{ try{ txt=await bootApp.lastBlobText(); return /\"_images\"/.test(txt); }catch(e){ return false; } },4000);
+    const bak=JSON.parse(txt);
+    assert(bak._images&&/^data:image\/png;base64,/.test(bak._images.e1),'备份应含 dataURL 图片');
+    assert(bak.diary[t].photos[0]==='e1');
+    const ls=JSON.parse(W.localStorage.getItem('lifeapp_v1'));
+    assert(ls._images===undefined,'localStorage 不得包含 _images');
+  }],
+  ['导入备份：_images 还原到 IDB 且从 state 剥离',async()=>{
+    await reset();
+    const t=W.__app.today();
+    const fresh=W.__app.defaultState();
+    fresh.diary[t]={text:'恢复的带图日记',mood:'开心',photos:['ip1']};
+    const payload=Object.assign({},fresh,{_images:{ip1:'data:image/png;base64,'+PNG_B64}});
+    const input=D.querySelector('input[type=file]');
+    const dt=new W.DataTransfer();
+    dt.items.add(new W.File([JSON.stringify(payload)],'bak.json',{type:'application/json'}));
+    input.files=dt.files;
+    input.dispatchEvent(new W.Event('change',{bubbles:true}));
+    await waitFor(()=>/已导入/.test(toastText()),4000);
+    await sleep(300);
+    eq(W.__app.state.diary[t].text,'恢复的带图日记');
+    assert(W.__app.state._images===undefined,'state 不应残留 _images');
+    const got=await W.__app.idbGet('ip1');
+    assert(got&&got.type==='image/png'&&got.size===pngBytes().length,'图片应还原进 IDB');
+  }],
+  ['dataURLtoBlob 正确还原 MIME 与字节',async()=>{
+    const b=W.__app.dataURLtoBlob('data:image/png;base64,'+PNG_B64);
+    eq(b.type,'image/png'); eq(b.size,pngBytes().length);
+  }]
+]);
+
+group('阶段五 5.2 备份提醒',[
+  ['纯函数：首次使用当天不提醒',async()=>{
+    await reset();
+    const r=W.__app.backupReminder(W.__app.today());
+    assert(r.enabled&&!r.overdue&&r.days===0,'当天不应超期，实际：'+JSON.stringify(r));
+  }],
+  ['纯函数：距上次导出 20 天（间隔14）→ 超期；3 天 → 不超期',async()=>{
+    const A=W.__app,t=A.today();
+    A.state.meta.lastBackup=A.addDays(t,-20); A.save();
+    eq(A.backupReminder(t).days,20);
+    assert(A.backupReminder(t).overdue===true);
+    A.state.meta.lastBackup=A.addDays(t,-3); A.save();
+    assert(A.backupReminder(t).overdue===false);
+  }],
+  ['从未导出但首次使用已 20 天 → 按首次使用日计算超期',async()=>{
+    const A=W.__app,t=A.today();
+    A.state.meta.lastBackup=''; A.state.meta.firstUse=A.addDays(t,-20); A.save();
+    const r=A.backupReminder(t);
+    eq(r.days,20); assert(r.overdue);
+  }],
+  ['关闭提醒后即使超期也不提醒；间隔可配',async()=>{
+    const A=W.__app,t=A.today();
+    A.state.meta.lastBackup=A.addDays(t,-20);
+    A.state.settings.backupRemind=false; A.save();
+    assert(!A.backupReminder(t).overdue);
+    A.state.settings.backupRemind=true; A.state.settings.backupDays=30; A.save();
+    assert(!A.backupReminder(t).overdue,'间隔 30 天时 20 天不超期');
+    A.state.settings.backupDays=14;
+  }],
+  ['首页：超期显示提示条（含立即导出/今日不再提示），未超期不显示',async()=>{
+    await reset();
+    const A=W.__app,t=A.today();
+    A.state.meta.lastBackup=A.addDays(t,-20); A.save();
+    await go('home');
+    let box=D.querySelector('.warnbox');
+    assert(box&&/20 天没有导出备份/.test(box.textContent),'应显示 20 天超期提示');
+    assert(box.querySelector('[data-act="export-data"]'),'应有立即导出按钮');
+    assert(box.querySelector('[data-act="backup-snooze"]'),'应有今日不再提示按钮');
+    await reset();
+    A.state.meta.lastBackup=A.addDays(t,-2); A.save();
+    await go('home');
+    assert(!D.querySelector('.warnbox'),'未超期不应显示提示条');
+  }],
+  ['「今天不再提示」后提示条消失并记录日期，次日恢复提示',async()=>{
+    const A=W.__app,t=A.today();
+    A.state.meta.lastBackup=A.addDays(t,-20); A.save();
+    await go('home');
+    D.querySelector('[data-act="backup-snooze"]').click();
+    await sleep(80);
+    eq(A.state.meta.snoozeDate,t);
+    assert(!D.querySelector('.warnbox'),'当日提示条应消失');
+    assert(A.backupReminder(t).snoozed===true);
+    assert(A.backupReminder(A.addDays(t,1)).snoozed===false,'次日不再 snooze');
+    assert(A.backupReminder(A.addDays(t,1)).overdue===true,'次日仍超期');
+  }],
+  ['首页点「立即导出」后记录导出日期，提示条消失',async()=>{
+    await reset();
+    const A=W.__app,t=A.today();
+    A.state.meta.lastBackup=A.addDays(t,-20); A.save();
+    await go('home');
+    D.querySelector('.warnbox [data-act="export-data"]').click();
+    await waitFor(()=>A.state.meta.lastBackup===t,4000);
+    eq(A.state.meta.lastBackup,t);
+    assert(!D.querySelector('.warnbox'),'导出后提示条应消失');
+  }],
+  ['已授权时：超期启动检查发系统通知，且每天至多一条',async()=>{
+    await reset();
+    const A=W.__app,t=A.today();
+    let calls=[];
+    function MockN(title,opt){ calls.push({title,opt}); }
+    MockN.permission='granted'; MockN.requestPermission=()=>Promise.resolve('granted');
+    W.Notification=MockN;
+    A.state.meta.lastBackup=A.addDays(t,-20); A.state.meta.notifyDate=''; A.save();
+    A.maybeBackupRemind();
+    A.maybeBackupRemind();
+    eq(calls.length,1,'当天只应发一条通知');
+    assert(/备份/.test(calls[0].title));
+    eq(A.state.meta.notifyDate,t);
+    delete W.Notification;
+  }],
+  ['未授权/不支持 Notification 时不报错，首页提示条照常显示',async()=>{
+    await reset();
+    const A=W.__app,t=A.today();
+    A.state.meta.lastBackup=A.addDays(t,-20); A.state.meta.notifyDate=''; A.save();
+    let threw=false;
+    try{ A.maybeBackupRemind(); }catch(e){ threw=true; }
+    assert(!threw);
+    await go('home');
+    assert(D.querySelector('.warnbox'),'页内提示条不依赖通知授权');
+  }],
+  ['设置页保存：可关闭提醒并修改间隔，立即生效',async()=>{
+    await reset();
+    const A=W.__app,t=A.today();
+    A.state.meta.lastBackup=A.addDays(t,-20); A.save();
+    await go('settings');
+    assert(D.querySelector('#setBackupRemind')&&D.querySelector('#setBackupDays'),'应有提醒设置控件');
+    D.querySelector('#setBackupRemind').value='0';
+    D.querySelector('#setBackupDays').value='7';
+    D.querySelector('[data-act="settings-save"]').click();
+    await sleep(80);
+    eq(A.state.settings.backupRemind,false);
+    eq(A.state.settings.backupDays,7);
+    await go('home');
+    assert(!D.querySelector('.warnbox'),'关闭后首页不再提示');
+  }],
+  ['迁移：旧备份（无 meta/新设置项）自动补齐',async()=>{
+    const s=W.__app.migrate({v:2,settings:{name:'旧用户',weekStart:1,calorieGoal:2000,entLimit:120,theme:'light'},
+      diet:{foods:[],meals:{},water:{}},games:{list:[],sessions:[]},fitness:{weekPlan:{},logs:[],weight:[]},media:{ideas:[],posts:[]}});
+    assert(s.meta&&/^\d{4}-\d{2}-\d{2}$/.test(s.meta.firstUse),'应补 firstUse');
+    eq(s.settings.backupRemind,true);
+    eq(s.settings.backupDays,14);
+  }]
+]);
+
+group('阶段五 5.3 PIN 锁屏',[
+  ['默认未开启锁屏，设置页有锁屏控件',async()=>{
+    await reset();
+    eq(W.__app.state.settings.pinLock,false);
+    assert(!W.__app.isLocked(),'默认不应处于锁定状态');
+    assert(!D.querySelector('.lockmask'),'不应出现锁屏遮罩');
+    await go('settings');
+    assert(D.querySelector('#setPinLock')&&D.querySelector('#setPinInput')&&D.querySelector('[data-act="pin-save"]'),'设置页应有锁屏控件');
+  }],
+  ['非法 PIN（少于4位/含字母/超过6位）被拒绝且不会开启',async()=>{
+    await reset();
+    await go('settings');
+    for(const bad of ['123','12a4','1234567','abcd']){
+      D.querySelector('#setPinLock').value='1';
+      D.querySelector('#setPinInput').value=bad;
+      clickAct('pin-save');
+      assert(!W.__app.state.settings.pinLock,'PIN「'+bad+'」不应开启锁屏');
+    }
+    eq(W.__app.state.settings.pin,'','非法 PIN 不得保存');
+    assert(/4-6 位数字/.test(toastText()),'应提示 PIN 格式，实际：'+toastText());
+  }],
+  ['合法 4 位 PIN 可开启并保存，但当前会话不立即锁定',async()=>{
+    D.querySelector('#setPinLock').value='1';
+    D.querySelector('#setPinInput').value='1234';
+    clickAct('pin-save');
+    await sleep(40);
+    eq(W.__app.state.settings.pinLock,true);
+    eq(W.__app.state.settings.pin,'1234');
+    assert(!W.__app.isLocked(),'下次打开时才锁屏，当前不锁');
+  }],
+  ['重新打开应用自动锁屏；锁定期间导航与操作全部被拦截',async()=>{
+    await bootApp();
+    assert(W.__app.isLocked(),'启动后应处于锁定状态');
+    assert(D.querySelector('.lockmask'),'应有锁屏遮罩');
+    const titleBefore=D.querySelector('#viewTitle').textContent;
+    D.querySelector('[data-nav="plan"]').click();
+    await sleep(30);
+    eq(D.querySelector('#viewTitle').textContent,titleBefore,'锁屏下不得切换页面');
+    D.querySelector('[data-act="note-add"]')&&D.querySelector('[data-act="note-add"]').click();
+    await sleep(30);
+    assert(!D.querySelector('.mask'),'锁屏下不得弹出弹窗');
+    eq(W.__app.state.quickNotes.length,0,'锁屏下操作不得写入数据');
+  }],
+  ['输错 PIN：保持锁定并提示错误',async()=>{
+    D.querySelector('#lockPin').value='9999';
+    clickAct('lock-unlock');
+    await sleep(20);
+    assert(W.__app.isLocked(),'错误 PIN 不得解锁');
+    assert(/不正确/.test(D.querySelector('#lockErr').textContent),'应显示错误提示');
+    eq(D.querySelector('#lockPin').value,'','错误后应清空输入');
+  }],
+  ['输对 PIN（支持回车）后解锁，可正常导航',async()=>{
+    const inp=D.querySelector('#lockPin');
+    inp.value='1234';
+    inp.dispatchEvent(new W.KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
+    await waitFor(()=>!D.querySelector('.lockmask'),4000);
+    assert(!W.__app.isLocked(),'正确 PIN 应解锁');
+    D.querySelector('[data-nav="plan"]').click();
+    await sleep(30);
+    assert(/计划/.test(D.querySelector('#viewTitle').textContent),'解锁后应可切换页面');
+  }],
+  ['关闭 PIN 锁后重新打开不再锁屏（PIN 一并清除）',async()=>{
+    await go('settings');
+    D.querySelector('#setPinLock').value='0';
+    D.querySelector('#setPinInput').value='';
+    clickAct('pin-save');
+    await sleep(40);
+    eq(W.__app.state.settings.pinLock,false);
+    eq(W.__app.state.settings.pin,'','关闭后 PIN 应清除');
+    await bootApp();
+    assert(!W.__app.isLocked()&&!D.querySelector('.lockmask'),'重新打开不应再锁屏');
+  }],
+  ['迁移：旧数据自动补齐 pinLock/pin',async()=>{
+    const s=W.__app.migrate({v:2,settings:{name:'旧用户',weekStart:1,calorieGoal:2000,entLimit:120,theme:'light'},
+      diet:{foods:[],meals:{},water:{}},games:{list:[],sessions:[]},fitness:{weekPlan:{},logs:[],weight:[]},media:{ideas:[],posts:[]}});
+    eq(s.settings.pinLock,false);
+    eq(s.settings.pin,'');
+  }]
+]);
+
+group('阶段五 5.4 CSV 导出',[
+  ['csvCell 转义与 toCSV 表头/BOM/换行',async()=>{
+    const A=W.__app;
+    eq(A.csvCell('普通文本'),'普通文本');
+    eq(A.csvCell('a,b'),'"a,b"','逗号应加引号');
+    eq(A.csvCell('他说"好"'),'"他说""好"""','引号应翻倍');
+    assert(/^"[\s\S]*"$/.test(A.csvCell('第一行\n第二行')),'换行应整体加引号');
+    const csv=A.toCSV(['列1','列2'],[['1','x,y']]);
+    assert(csv.charCodeAt(0)===0xFEFF,'应以 BOM 开头，方便 Excel 识别中文');
+    assert(csv.indexOf('\r\n')>0,'行应以 CRLF 分隔');
+    assert(/列1,列2/.test(csv));
+    assert(/"x,y"/.test(csv));
+  }],
+  ['计划任务 CSV：按日期排序、完成状态、特殊字符转义',async()=>{
+    await reset(); const A=W.__app;
+    A.state.tasks['2026-03-02']=[{id:'t1',text:'写周报,初稿',time:'09:00',pri:'高',note:'他说"快点"',done:true}];
+    A.state.tasks['2026-03-01']=[{id:'t2',text:'开会',time:'',pri:'中',note:'',done:false}]; A.save();
+    const r=A.csvBuild('tasks');
+    eq(r.headers,['日期','内容','计划时间','优先级','备注','状态']);
+    eq(r.rows.length,2);
+    eq(r.rows[0],['2026-03-01','开会','','中','','未完成']);
+    eq(r.rows[1][0],'2026-03-02'); eq(r.rows[1][5],'已完成');
+    const csv=A.toCSV(r.headers,r.rows);
+    assert(/"写周报,初稿"/.test(csv)&&/他说""快点""/.test(csv));
+  }],
+  ['饮食与饮水 CSV：餐次/份数/热量与杯数',async()=>{
+    await reset(); const A=W.__app;
+    A.state.diet.meals['2026-03-02']=[{id:'m1',name:'米饭,鸡胸肉',kcal:520,n:1,mealType:'午餐'}];
+    A.state.diet.meals['2026-03-01']=[{id:'m2',name:'燕麦',kcal:300,n:2,mealType:'早餐'}];
+    A.state.diet.water['2026-03-02']=6; A.state.diet.water['2026-03-03']=0; A.save();
+    const diet=A.csvBuild('diet');
+    eq(diet.rows.length,2);
+    eq(diet.rows[0],['2026-03-01','早餐','燕麦',2,300]);
+    eq(diet.rows[1],['2026-03-02','午餐','米饭,鸡胸肉',1,520]);
+    const water=A.csvBuild('water');
+    eq(water.rows,[['2026-03-02',6]],'杯数为 0 的日期不应导出');
+  }],
+  ['娱乐 CSV：关联游戏名（含已删除占位）并按日期排序',async()=>{
+    await reset(); const A=W.__app;
+    A.state.games.list=[{id:'g1',name:'塞尔达',status:'pause'}];
+    A.state.games.sessions=[
+      {id:'s2',gid:'gone',date:'2026-03-02',minutes:30},
+      {id:'s1',gid:'g1',date:'2026-03-01',minutes:80}
+    ]; A.save();
+    const r=A.csvBuild('games');
+    eq(r.rows,[['2026-03-01','塞尔达',80],['2026-03-02','（已删除的游戏）',30]]);
+  }],
+  ['健身 CSV：多动作展开为多行；无动作训练保留一行；体重独立导出',async()=>{
+    await reset(); const A=W.__app;
+    A.state.fitness.logs=[
+      {id:'l2',date:'2026-03-02',name:'胸',ex:[{name:'卧推',sets:4,reps:8,weight:60},{name:'俯卧撑',sets:3,reps:20,weight:''}]},
+      {id:'l1',date:'2026-03-01',name:'恢复走',ex:[]}
+    ];
+    A.state.fitness.weight=[{id:'w2',date:'2026-03-02',kg:70.5},{id:'w1',date:'2026-03-01',kg:71}]; A.save();
+    const log=A.csvBuild('fitlog');
+    eq(log.rows.length,3);
+    eq(log.rows[0],['2026-03-01','恢复走','','','','']);
+    eq(log.rows[1],['2026-03-02','胸','卧推',4,8,60]);
+    eq(log.rows[2],['2026-03-02','胸','俯卧撑',3,20,'']);
+    eq(A.csvBuild('weight').rows,[['2026-03-01',71],['2026-03-02',70.5]]);
+  }],
+  ['冥想 CSV：时长与备注（逗号转义）',async()=>{
+    await reset(); const A=W.__app;
+    A.state.meditation=[
+      {id:'d2',date:'2026-03-02',minutes:10,note:'早起,静心'},
+      {id:'d1',date:'2026-03-01',minutes:20,note:''}
+    ]; A.save();
+    const r=A.csvBuild('meditation');
+    eq(r.rows[0],['2026-03-01',20,'']);
+    eq(r.rows[1],['2026-03-02',10,'早起,静心']);
+    assert(/"早起,静心"/.test(A.toCSV(r.headers,r.rows)));
+  }],
+  ['日记 CSV：心情/正文换行转义/配图数',async()=>{
+    await reset(); const A=W.__app;
+    A.state.diary['2026-03-02']={text:'今天很充实\n继续加油',mood:'开心',photos:['p1','p2']};
+    A.state.diary['2026-03-01']={text:'平淡',mood:'',photos:[]}; A.save();
+    const r=A.csvBuild('diary');
+    eq(r.rows[0],['2026-03-01','','平淡',0]);
+    eq(r.rows[1],['2026-03-02','开心','今天很充实\n继续加油',2]);
+    const csv=A.toCSV(r.headers,r.rows);
+    assert(/"今天很充实\n继续加油"/.test(csv),'含换行正文应被引号包裹');
+  }],
+  ['习惯 CSV：累计天数与当前连续天数',async()=>{
+    await reset(); const A=W.__app,t=A.today();
+    A.state.habits=[
+      {id:'h1',name:'阅读',checks:[t,A.addDays(t,-1),A.addDays(t,-5)]},
+      {id:'h2',name:'跑步',checks:[]}
+    ]; A.save();
+    const r=A.csvBuild('habits');
+    eq(r.rows[0],['阅读',3,2],'最近两天连续，streak 应为 2');
+    eq(r.rows[1],['跑步',0,0]);
+  }],
+  ['空数据：全部模块仅含表头且不报错；未知模块抛错',async()=>{
+    await reset(); const A=W.__app;
+    const kinds=['tasks','diet','water','games','fitlog','weight','meditation','diary','habits'];
+    kinds.forEach(k=>{
+      const r=A.csvBuild(k);
+      assert(Array.isArray(r.headers)&&r.headers.length>0,k+' 应有表头');
+      eq(r.rows.length,0,k+' 空数据行数应为 0');
+    });
+    let threw=false; try{ A.csvBuild('nope'); }catch(e){ threw=true; }
+    assert(threw,'未知模块应抛错');
+  }],
+  ['设置页点击按钮：真实生成 text/csv 文件（含 BOM 与数据）',async()=>{
+    await reset(); const A=W.__app;
+    A.state.tasks[A.today()]=[{id:'t1',text:'CSV 联调任务',time:'10:00',pri:'中',note:'',done:false}]; A.save();
+    await go('settings');
+    clickAct('csv-tasks');
+    let txt='';
+    await waitFor(async()=>{ try{ txt=await bootApp.lastBlobOfType('text/csv'); return /CSV 联调任务/.test(txt); }catch(e){ return false; } },4000);
+    assert(/日期,内容,计划时间/.test(txt),'应包含中文表头');
+    assert(/CSV 联调任务/.test(txt));
+    assert(/CSV 已导出/.test(toastText()),'应有导出提示，实际：'+toastText());
+  }]
+]);
+
+group('阶段五 5.5 PWA（manifest + Service Worker）',[
+  ['页面头部包含 manifest、theme-color 与图标声明',async()=>{
+    const link=D.querySelector('link[rel="manifest"]');
+    assert(link&&/manifest\.webmanifest$/.test(link.getAttribute('href')),'应有 manifest 链接');
+    eq(D.querySelector('meta[name="theme-color"]').content,'#4f6ef7');
+    const icon=D.querySelector('link[rel="icon"]');
+    assert(icon&&/icon\.svg$/.test(icon.getAttribute('href')),'应有 SVG 图标');
+    eq(icon.type,'image/svg+xml');
+  }],
+  ['注册代码仅在 http(s) 下执行：file:// 双击用法不受影响',async()=>{
+    const src=await (await W.fetch('/index.html')).text();
+    assert(/'serviceWorker' in navigator/.test(src),'应做能力检测');
+    assert(/https\?:/.test(src),'应校验协议，file: 下不注册');
+    assert(/register\('sw\.js'\)/.test(src),'应注册 sw.js');
+  }],
+  ['manifest 可访问且字段完整，图标文件真实存在',async()=>{
+    const res=await W.fetch('manifest.webmanifest');
+    assert(res.ok,'manifest 应返回 200');
+    const m=await res.json();
+    assert(m.name&&m.short_name,'应有名称');
+    eq(m.display,'standalone');
+    assert(/^[\w.\/-]*index\.html/.test(m.start_url),'start_url 应指向 index.html');
+    assert(Array.isArray(m.icons)&&m.icons.length>=1,'至少一个图标');
+    const iconRes=await W.fetch(m.icons[0].src);
+    assert(iconRes.ok,'图标应可访问');
+    const body=await iconRes.text();
+    assert(/<svg[\s>]/i.test(body.slice(0,200)),'图标应为 SVG，实际开头：'+body.slice(0,40));
+  }],
+  ['sw.js 可访问，含安装/激活/拦截三段逻辑',async()=>{
+    const res=await W.fetch('sw.js');
+    assert(res.ok,'sw.js 应返回 200');
+    assert(/application\/javascript|text\/javascript/.test(res.headers.get('content-type')||''),'MIME 应为 JS，实际：'+res.headers.get('content-type'));
+    const js=await res.text();
+    ['install','activate','fetch','caches','skipWaiting','clients.claim'].forEach(k=>{
+      assert(js.indexOf(k)>=0,'sw.js 应包含 '+k);
+    });
+    assert(/index\.html/.test(js),'应预缓存应用外壳');
+  }],
+  ['http 环境下自动注册并激活 Service Worker',async()=>{
+    const reg=await waitFor(async()=>{
+      const r=await W.navigator.serviceWorker.getRegistration();
+      return r&&r.active?r:null;
+    },9000);
+    assert(/sw\.js/.test(reg.active.scriptURL),'active worker 应来自 sw.js');
+  }],
+  ['重新加载后受 SW 控制，且应用外壳已入缓存（可离线）',async()=>{
+    await bootApp();
+    await waitFor(()=>W.navigator.serviceWorker.controller,9000);
+    const cache=await waitFor(async()=>{
+      const keys=await W.caches.keys();
+      const k=keys.find(x=>/^lifeapp/.test(x));
+      if(!k) return null;
+      const hit=await W.caches.match(W.location.origin+'/index.html');
+      return hit?k:null;
+    },9000);
+    assert(cache,'应存在 lifeapp 缓存且含 index.html 外壳');
+  }]
+]);
+
+run();
+</script>
+</body>
+</html>

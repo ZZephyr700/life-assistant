@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5b7cfa"/>
+      <stop offset="1" stop-color="#3d5ce0"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#g)"/>
+  <!-- 屋顶 -->
+  <path d="M138 226 L256 128 L374 226 Z" fill="#ffffff"/>
+  <!-- 房身 -->
+  <rect x="172" y="232" width="168" height="150" rx="14" fill="#ffffff"/>
+  <!-- 门 -->
+  <rect x="232" y="292" width="48" height="90" rx="8" fill="#3d5ce0"/>
+  <!-- 心形点缀 -->
+  <path d="M338 330 c-10 -16 -34 -8 -34 12 c0 18 34 34 34 34 c0 0 34 -16 34 -34 c0 -20 -24 -28 -34 -12 z" fill="#ff7a90"/>
+  <text x="256" y="452" text-anchor="middle" font-family="-apple-system,'PingFang SC','Microsoft YaHei',sans-serif" font-size="52" font-weight="700" fill="#ffffff" opacity="0.92">生活助手</text>
+</svg>
