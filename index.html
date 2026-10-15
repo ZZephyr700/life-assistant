@@ -259,18 +259,6 @@ label.fl{display:block;font-size:12px;font-weight:600;color:var(--muted);margin:
 .item .meta{margin-top:2px;font-size:12px;color:var(--muted);display:flex;gap:8px;flex-wrap:wrap}
 
 /* 首页 */
-.hello{
-  position:relative;overflow:hidden;padding:26px 28px;margin-bottom:16px;border-radius:24px;color:#fff;
-  border:1px solid rgba(255,255,255,.22);
-  background:
-    radial-gradient(90% 140% at -6% -30%,rgba(255,255,255,.34),transparent 55%),
-    radial-gradient(70% 110% at 104% 130%,rgba(255,180,235,.42),transparent 55%),
-    linear-gradient(128deg,#5b82ff 0%,#6f63f4 48%,#a25cf0 100%);
-  box-shadow:inset 0 1px 1px rgba(255,255,255,.4),0 20px 48px -18px rgba(80,70,210,.65);
-}
-html[data-theme="dark"] .hello{box-shadow:inset 0 1px 1px rgba(255,255,255,.22),0 22px 52px -18px rgba(0,0,0,.7)}
-.hello .big{font-size:22px;font-weight:750;letter-spacing:-.4px}
-.hello .day{opacity:.88;margin-top:4px;font-size:13.5px}
 .mini{
   padding:15px 16px;border-radius:16px;cursor:pointer;display:block;width:100%;text-align:left;
   background:var(--glass-2);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
@@ -282,6 +270,61 @@ html[data-theme="dark"] .hello{box-shadow:inset 0 1px 1px rgba(255,255,255,.22),
 .mini .t{font-size:12px;color:var(--muted);display:flex;justify-content:space-between}
 .mini .v{font-size:17px;font-weight:680;margin-top:4px;letter-spacing:-.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mini .v.sm2{font-size:13.5px;font-weight:550}
+
+/* 首页 · 控制中心（Spotlight 聚焦主标题 + 3D 玻璃卡片入口，无任何气象元素） */
+.cc-hero{
+  position:relative;overflow:hidden;margin-bottom:16px;padding:30px 26px 32px;border-radius:26px;
+  background:var(--glass);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);
+  border:1px solid var(--hairline-soft);box-shadow:var(--shadow-glass);
+}
+.cc-spot{
+  position:absolute;left:50%;top:-58%;width:150%;height:170%;transform:translateX(-50%);pointer-events:none;
+  background:
+    radial-gradient(42% 58% at 50% 50%,color-mix(in srgb,var(--primary) 30%,transparent),transparent 68%),
+    radial-gradient(26% 38% at 50% 50%,color-mix(in srgb,var(--primary-2) 20%,transparent),transparent 72%);
+  filter:blur(6px);opacity:.9;
+}
+.cc-hd{position:relative;text-align:center;margin-bottom:22px}
+.cc-eyebrow{
+  display:inline-flex;align-items:center;gap:6px;padding:4px 13px;border-radius:99px;font-size:11.5px;font-weight:600;
+  color:var(--primary-text);background:var(--primary-soft);border:1px solid color-mix(in srgb,var(--primary) 22%,transparent);
+}
+.cc-hd h2{
+  margin-top:14px;font-size:30px;font-weight:800;letter-spacing:-.8px;color:var(--text);
+  background:linear-gradient(180deg,var(--text),color-mix(in srgb,var(--text) 52%,transparent));
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
+}
+.cc-hd .cc-day{color:var(--muted);margin-top:6px;font-size:13px}
+.cc-grid{position:relative;display:grid;grid-template-columns:repeat(4,1fr);gap:14px;perspective:1200px}
+@media(max-width:1000px){.cc-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:560px){.cc-grid{grid-template-columns:1fr}}
+@keyframes ccIn{from{opacity:0;transform:translateY(16px)}}
+.cc-card{
+  position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:6px;width:100%;text-align:left;
+  padding:18px 16px;border-radius:18px;transform-style:preserve-3d;will-change:transform;
+  background:var(--glass-2);border:1px solid var(--hairline-soft);box-shadow:var(--shadow-glass);
+  transition:transform .3s var(--ease-spring),box-shadow .3s var(--ease-spring),border-color .3s;
+  animation:ccIn .55s var(--ease-spring) backwards;
+}
+.cc-card:nth-child(2){animation-delay:.07s}
+.cc-card:nth-child(3){animation-delay:.14s}
+.cc-card:nth-child(4){animation-delay:.21s}
+.cc-card:hover{border-color:var(--hairline);box-shadow:var(--shadow-lift);transform:translateY(-5px)}
+.cc-card:active{transform:translateY(-2px) scale(.99)}
+@media(prefers-reduced-motion:reduce){.cc-card{animation:none}}
+.cc-card .cc-ic{
+  display:flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:13px;font-size:20px;
+  border:1px solid var(--hairline);box-shadow:inset 0 1px 1px rgba(255,255,255,.6);transform:translateZ(38px);
+  background:linear-gradient(150deg,color-mix(in srgb,var(--primary) 26%,var(--glass-2)),var(--glass-2));
+}
+html[data-theme="dark"] .cc-card .cc-ic{box-shadow:inset 0 1px 1px rgba(255,255,255,.10)}
+.cc-card:nth-child(1) .cc-ic{background:linear-gradient(150deg,color-mix(in srgb,#4f9dff 32%,var(--glass-2)),var(--glass-2))}
+.cc-card:nth-child(2) .cc-ic{background:linear-gradient(150deg,color-mix(in srgb,#a06bff 32%,var(--glass-2)),var(--glass-2))}
+.cc-card:nth-child(3) .cc-ic{background:linear-gradient(150deg,color-mix(in srgb,#ff9f0a 30%,var(--glass-2)),var(--glass-2))}
+.cc-card:nth-child(4) .cc-ic{background:linear-gradient(150deg,color-mix(in srgb,#34c759 30%,var(--glass-2)),var(--glass-2))}
+.cc-card .cc-name{font-size:15.5px;font-weight:700;letter-spacing:-.3px;transform:translateZ(26px)}
+.cc-card .cc-desc{font-size:12px;color:var(--muted);line-height:1.55;transform:translateZ(16px)}
+.cc-card .cc-status{margin-top:4px;font-size:12px;font-weight:650;color:var(--primary-text);transform:translateZ(30px)}
 
 /* 看板：内凹玻璃井 + 悬浮卡片 */
 .board{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
@@ -861,10 +904,40 @@ views.home=function(){
   ).join('')||'<div class="empty small">还没有备忘，随手记一条试试</div>';
 
   $('#view').innerHTML=`
-  <div class="hello">
-    <div class="big">${greet}${S.settings.name?'，'+esc(S.settings.name):''} 👋</div>
-    <div class="day">${fullCN(t)}</div>
-  </div>
+  <section class="cc-hero">
+    <div class="cc-spot" aria-hidden="true"></div>
+    <div class="cc-hd">
+      <span class="cc-eyebrow">本地优先 · 无需联网 · 数据留在自己的电脑上</span>
+      <h2>${greet}${S.settings.name?'，'+esc(S.settings.name):''} 👋</h2>
+      <div class="cc-day">${fullCN(t)}</div>
+    </div>
+    <div class="cc-grid" id="ccGrid">
+      <button class="cc-card" data-nav="plan">
+        <span class="cc-ic">📝</span>
+        <span class="cc-name">今日计划</span>
+        <span class="cc-desc">把今天要做的事收进清单，完成一件划掉一件。</span>
+        <span class="cc-status">${done}/${all} 已完成 · ${pct}%</span>
+      </button>
+      <button class="cc-card" data-nav="media">
+        <span class="cc-ic">📱</span>
+        <span class="cc-name">自媒体</span>
+        <span class="cc-desc">选题、内容流水线和数据看板，一处管到底。</span>
+        <span class="cc-status">${ready} 条待发布 · 已发 ${pub}</span>
+      </button>
+      <button class="cc-card" data-nav="diary">
+        <span class="cc-ic">📔</span>
+        <span class="cc-name">日记习惯</span>
+        <span class="cc-desc">写下今天的心情，顺手给习惯打个卡。</span>
+        <span class="cc-status">${hbDone}/${hbs.length} 已完成</span>
+      </button>
+      <button class="cc-card" data-nav="fitness">
+        <span class="cc-ic">💪</span>
+        <span class="cc-name">健身计划</span>
+        <span class="cc-desc">按周安排训练，记录重量与身体变化。</span>
+        <span class="cc-status">今日　${esc(fitToday)}</span>
+      </button>
+    </div>
+  </section>
 
   <div class="grid g4" style="margin-bottom:16px">
     <button class="mini" data-nav="meditation"><div class="t"><span>冥想</span><span>🧘</span></div><div class="v">${med?med+' 分钟':'今日未冥想'}</div></button>
@@ -895,6 +968,20 @@ views.home=function(){
       ${notes}
     </div>
   </div>`;
+
+  /* 控制中心 3D 玻璃卡片：跟随指针做轻微透视倾斜（无网络、无依赖） */
+  const ccGrid=$('#ccGrid');
+  if(ccGrid){
+    ccGrid.querySelectorAll('.cc-card').forEach(card=>{
+      card.addEventListener('mousemove',ev=>{
+        const r=card.getBoundingClientRect();
+        const px=(ev.clientX-r.left)/r.width-.5, py=(ev.clientY-r.top)/r.height-.5;
+        card.style.transform='translateY(-5px) rotateX('+(-py*9).toFixed(2)+'deg) rotateY('+(px*11).toFixed(2)+'deg)';
+      });
+      card.addEventListener('mouseleave',()=>{ card.style.transform=''; });
+    });
+  }
+
   const qi=$('#quickInput');
   qi.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); doAct('note-add',{dataset:{}}); }});
   qi.focus();
