@@ -659,6 +659,28 @@ label.fl:has(+ #setTheme){display:none!important}
   .cc-card::before{display:none}
   #cursorGlow{display:none}
 }
+/* ================================================================
+   首屏伙伴：跟随指针的小人脸（由增强层注入，装饰性，不参与交互）
+   竖版画框：头 + 肩，下缘靠渐隐收边
+   ================================================================ */
+#heroBuddy{position:absolute;right:-6px;top:50%;transform:translateY(-52%);
+  width:206px;height:248px;pointer-events:none;z-index:0}
+@media(max-width:1180px){
+  #heroBuddy{width:172px;height:208px;right:-8px}
+}
+@media(max-width:860px){
+  #heroBuddy{width:132px;height:160px;right:-6px;opacity:.95}
+}
+@media(max-width:640px){
+  /* 窄屏标题几乎占满宽度，把它缩小并抬到标题右上角外侧 */
+  #heroBuddy{width:104px;height:126px;right:0;top:-8px;transform:none;opacity:.9}
+}
+@media(prefers-reduced-motion:reduce){
+  #heroBuddy{display:none}
+}
+@media(hover:none){
+  #heroBuddy{display:none}
+}
 
 /* ========== 侧边导航（与纸面对比的素面栏） ========== */
 .side{
@@ -2876,6 +2898,452 @@ if('serviceWorker' in navigator&&/^https?:$/.test(location.protocol)){
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
+})();
+</script>
+<script>
+/* ================================================================
+   首屏伙伴：以本人照片为原型的卡通小人脸，跟随指针而动
+   ----------------------------------------------------------------
+   抓取的特征（按辨识度排序）：
+     1. 蓬乱上翘的黑发，发丝朝多个方向散开，中分偏不规则
+     2. 黑框眉线眼镜（上半圈粗黑、下半圈细银），这是最强识别点
+     3. 深色瞳仁、略粗的眉、鼻梁有肉、唇形偏厚、唇色自然粉
+     4. 黑色 T 恤领口
+   手法：原生 Canvas 2D + 多层渐变塑形 + 分层视差（脸/五官/前发不同系数）
+   零依赖、约 14KB、完全离线。reduced-motion 与触屏下不生成。
+   ================================================================ */
+(function () {
+  'use strict';
+  if (!window.matchMedia) return;
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  if (window.matchMedia('(hover: none)').matches) return;
+
+  var ID = 'heroBuddy';
+  var rafId = 0, cv = null, g = null, host = null, dpr = 1, t = 0, last = 0;
+
+  /* 指针：目标与插值位置（-1..1）；near = 靠近程度 */
+  var tx = 0, ty = 0, nx = 0, ny = 0, near = 0;
+  var blinkAt = 1.2, blinkPhase = 0, blinking = 0;
+
+  /* ---------------- 配色：取自照片 ---------------- */
+  var SKIN_HI = '#f2d3b6', SKIN = '#e6b894', SKIN_MID = '#d9a179', SKIN_LO = '#b0764f';
+  var HAIR_HI = '#3a3d4a', HAIR = '#212430', HAIR_LO = '#12141c';
+  var FRAME = '#191b22', FRAME_HI = '#4a4e5c';   // 镜框：黑上半圈 + 细银下半圈
+  var IRIS_HI = '#6b4a33', IRIS = '#3a271c', IRIS_LO = '#1a1009';
+  var LIP_HI = '#c9776e', LIP = '#b0605a', LIP_LO = '#8a4440';
+  var SHIRT_HI = '#2b2e38', SHIRT = '#1c1f27', SHIRT_LO = '#101219';
+
+  function rgba(hex, a) {
+    var h = String(hex).replace('#', '');
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    var n = parseInt(h, 16);
+    if (isNaN(n)) return 'rgba(255,255,255,' + a + ')';
+    return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+  }
+  function mix(a, b, k) {
+    var pa = parseInt(a.replace('#', ''), 16), pb = parseInt(b.replace('#', ''), 16);
+    var r = Math.round((((pa >> 16) & 255) * (1 - k)) + (((pb >> 16) & 255) * k));
+    var gg = Math.round((((pa >> 8) & 255) * (1 - k)) + (((pb >> 8) & 255) * k));
+    var bl = Math.round(((pa & 255) * (1 - k)) + ((pb & 255) * k));
+    return 'rgb(' + r + ',' + gg + ',' + bl + ')';
+  }
+  function accent() {
+    var v = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+    return v || '#7c95ff';
+  }
+
+  function build() {
+    var hd = document.querySelector('.cc-hd');
+    if (!hd) return false;
+    if (hd.querySelector('#' + ID)) return true;
+    host = document.createElement('div');
+    host.id = ID;
+    host.setAttribute('aria-hidden', 'true');
+    cv = document.createElement('canvas');
+    cv.style.cssText = 'width:100%;height:100%;display:block';
+    host.appendChild(cv);
+    hd.appendChild(host);
+    g = cv.getContext('2d');
+    resize();
+    return true;
+  }
+  function resize() {
+    if (!cv) return;
+    /* 画布按 CSS 像素的 2 倍起，保证线条与镜框不糊（上限 3 倍，避免大屏过重） */
+    dpr = Math.min(3, Math.max(2, window.devicePixelRatio || 1));
+    var r = host.getBoundingClientRect();
+    var w = Math.max(60, Math.round(r.width || 206));
+    var h = Math.max(60, Math.round(r.height || 248));
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+  }
+  function aim(cx, cy) {
+    if (!host) return;
+    var r = host.getBoundingClientRect();
+    if (!r.width) return;
+    var mx = r.left + r.width / 2, my = r.top + r.height / 2;
+    var dx = (cx - mx) / (r.width * 0.8), dy = (cy - my) / (r.height * 0.8);
+    var d = Math.sqrt(dx * dx + dy * dy) || 1;
+    var k = Math.min(1, d);
+    tx = (dx / d) * k; ty = (dy / d) * k;
+    var dist = Math.sqrt((cx - mx) * (cx - mx) + (cy - my) * (cy - my));
+    near += ((dist < r.width * 1.35 ? 1 : 0) - near) * 0.07;
+  }
+
+  /* 一簇头发：三次贝塞尔，方向和弯曲可调 */
+  function strand(x, y, len, ang, curl, w) {
+    var ex = x + Math.cos(ang) * len, ey = y + Math.sin(ang) * len;
+    var mx = x + Math.cos(ang + curl) * len * 0.55, my = y + Math.sin(ang + curl) * len * 0.55;
+    g.beginPath();
+    g.moveTo(x, y);
+    g.quadraticCurveTo(mx, my, ex, ey);
+    g.lineWidth = w; g.stroke();
+  }
+
+  function draw() {
+    if (!g) return;
+    var W = cv.width / dpr, H = cv.height / dpr;
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+
+    var A = accent();
+    var S = Math.min(W, H);
+    /* 头基准半径：占短边约 30%，让脸充满画框而不是缩在中间 */
+    var R = S * 0.295;
+    var cx = W * 0.50 + nx * S * 0.028;
+    var cy = H * 0.455 + Math.sin(t * 1.05) * S * 0.009 + ny * S * 0.022;
+
+    /* ---- 背光光晕：呼应站内强调色 ---- */
+    var glow = g.createRadialGradient(cx, cy, R * 0.7, cx, cy, R * 2.4);
+    glow.addColorStop(0, rgba(A, 0.20 + near * 0.16));
+    glow.addColorStop(0.5, rgba(A, 0.06 + near * 0.06));
+    glow.addColorStop(1, rgba(A, 0));
+    g.fillStyle = glow;
+    g.beginPath(); g.arc(cx, cy, R * 2.4, 0, Math.PI * 2); g.fill();
+
+    /* ---- 肩与黑色领口（先画，被头压住；下缘故意超出画布，靠渐隐收边） ---- */
+    var sy = cy + R * 1.50;
+    var sg = g.createLinearGradient(0, sy - R * 0.4, 0, sy + R * 1.4);
+    sg.addColorStop(0, SHIRT_HI); sg.addColorStop(0.55, SHIRT); sg.addColorStop(1, SHIRT_LO);
+    g.fillStyle = sg;
+    g.beginPath();
+    g.moveTo(cx - R * 1.96, sy + R * 1.70);
+    g.quadraticCurveTo(cx - R * 1.42, sy - R * 0.16, cx - R * 0.38, sy - R * 0.30);
+    g.quadraticCurveTo(cx, sy + R * 0.12, cx + R * 0.38, sy - R * 0.30);
+    g.quadraticCurveTo(cx + R * 1.42, sy - R * 0.16, cx + R * 1.96, sy + R * 1.70);
+    g.closePath(); g.fill();
+    /* 领口暗部 */
+    g.fillStyle = rgba('#05060a', 0.55);
+    g.beginPath();
+    g.moveTo(cx - R * 0.38, sy - R * 0.30);
+    g.quadraticCurveTo(cx, sy + R * 0.18, cx + R * 0.38, sy - R * 0.30);
+    g.quadraticCurveTo(cx, sy + R * 0.52, cx - R * 0.38, sy - R * 0.30);
+    g.fill();
+
+    /* ---- 脖子 ---- */
+    var neck = g.createLinearGradient(0, cy + R * 0.6, 0, sy);
+    neck.addColorStop(0, mix(SKIN, SKIN_LO, 0.42));
+    neck.addColorStop(1, mix(SKIN, SKIN_LO, 0.24));
+    g.fillStyle = neck;
+    g.beginPath();
+    g.moveTo(cx - R * 0.42, cy + R * 0.70);
+    g.lineTo(cx - R * 0.46, sy - R * 0.06);
+    g.quadraticCurveTo(cx, sy + R * 0.16, cx + R * 0.46, sy - R * 0.06);
+    g.lineTo(cx + R * 0.42, cy + R * 0.70);
+    g.closePath(); g.fill();
+
+    /* ---- 后发（最底层，蓬松轮廓） ---- */
+    g.save();
+    g.translate(cx + nx * S * 0.010, cy + ny * S * 0.008);
+    var hg = g.createLinearGradient(0, -R * 1.9, 0, R * 1.3);
+    hg.addColorStop(0, HAIR_HI); hg.addColorStop(0.5, HAIR); hg.addColorStop(1, HAIR_LO);
+    g.fillStyle = hg;
+    g.beginPath();
+    g.ellipse(0, -R * 0.30, R * 1.24, R * 1.26, 0, 0, Math.PI * 2);
+    g.fill();
+    /* 两侧蓬出去的体积 */
+    for (var s = -1; s <= 1; s += 2) {
+      g.beginPath();
+      g.ellipse(s * R * 0.96, -R * 0.10, R * 0.40, R * 0.66, s * 0.20, 0, Math.PI * 2);
+      g.fill();
+    }
+    /* 蓬松轮廓：7 团相互重叠的平滑发块，拼出不规则外轮廓（比放射尖刺更像真发），
+       外层随时间极缓起伏，模拟发丝自身的飘动 */
+    g.fillStyle = HAIR;
+    var MASS = [
+      /* [角度, 距离, 半径x, 半径y, 旋转, 相位] */
+      [-Math.PI * 0.50, 1.06, 0.52, 0.46, 0.00, 0.0],
+      [-Math.PI * 0.72, 1.10, 0.50, 0.44, -0.35, 1.7],
+      [-Math.PI * 0.28, 1.10, 0.50, 0.44, 0.35, 3.1],
+      [-Math.PI * 0.94, 1.00, 0.44, 0.52, -0.55, 2.2],
+      [-Math.PI * 0.06, 1.00, 0.44, 0.52, 0.55, 4.4],
+      [-Math.PI * 1.10, 0.84, 0.36, 0.46, -0.70, 5.5],
+      [Math.PI * 0.10, 0.84, 0.36, 0.46, 0.70, 0.9]
+    ];
+    for (var mi = 0; mi < MASS.length; mi++) {
+      var M = MASS[mi];
+      var breathe = 1 + Math.sin(t * 0.9 + M[5]) * 0.018;
+      var mxp = Math.cos(M[0]) * R * M[1];
+      var myp = Math.sin(M[0]) * R * M[1] - R * 0.20;
+      g.beginPath();
+      g.ellipse(mxp, myp, R * M[2] * breathe, R * M[3] * breathe, M[4], 0, Math.PI * 2);
+      g.fill();
+    }
+    /* 顶部一撮略高的隆起，避免过于对称 */
+    g.beginPath();
+    g.ellipse(-R * 0.16, -R * 1.30, R * 0.40, R * 0.26, -0.18, 0, Math.PI * 2);
+    g.fill();
+    /* 少量翘出的细发丝：只做点缀，不铺满一圈 */
+    g.strokeStyle = mix(HAIR, HAIR_HI, 0.30); g.lineCap = 'round';
+    var WISP = [[-0.86, 0.52, 0.30], [-0.30, 0.56, -0.34], [0.20, 0.50, 0.26],
+                [-1.02, 0.44, -0.42], [0.55, 0.40, 0.38], [-0.05, 0.58, 0.20]];
+    for (var wi = 0; wi < WISP.length; wi++) {
+      var wa = Math.PI * (0.5 + WISP[wi][0] * 0.5) + Math.PI * 0.5;
+      var sw = Math.sin(t * 0.7 + wi * 1.9) * 0.10;
+      g.lineWidth = R * 0.038;
+      strand(Math.cos(wa) * R * 1.00, Math.sin(wa) * R * 1.02 - R * 0.22,
+             R * WISP[wi][1], wa + WISP[wi][2] + sw, (wi % 2 ? 0.6 : -0.6), g.lineWidth);
+    }
+    g.restore();
+
+    /* ---- 脸 ---- */
+    var fx = cx + nx * S * 0.038, fy = cy + ny * S * 0.030;   // 五官层（视差更大）
+    g.save();
+    g.translate(cx + nx * S * 0.016, cy + ny * S * 0.012);
+    var skin = g.createRadialGradient(-R * 0.30, -R * 0.40, R * 0.12, 0, R * 0.05, R * 1.40);
+    skin.addColorStop(0, SKIN_HI);
+    skin.addColorStop(0.45, SKIN);
+    skin.addColorStop(0.78, SKIN_MID);
+    skin.addColorStop(1, mix(SKIN_MID, SKIN_LO, 0.55));
+    g.fillStyle = skin;
+    g.beginPath(); g.ellipse(0, 0, R, R * 1.10, 0, 0, Math.PI * 2); g.fill();
+    /* 下颌收窄（照片里下巴偏窄） */
+    g.beginPath();
+    g.moveTo(-R * 0.70, R * 0.42);
+    g.quadraticCurveTo(0, R * 1.30, R * 0.70, R * 0.42);
+    g.quadraticCurveTo(0, R * 0.86, -R * 0.70, R * 0.42);
+    g.fillStyle = mix(SKIN, SKIN_MID, 0.5);
+    g.fill();
+    /* 耳 */
+    for (var e2 = -1; e2 <= 1; e2 += 2) {
+      g.beginPath();
+      g.ellipse(e2 * R * 0.99, R * 0.06, R * 0.145, R * 0.20, 0, 0, Math.PI * 2);
+      g.fillStyle = mix(SKIN, SKIN_LO, 0.30); g.fill();
+    }
+    g.restore();
+
+    /* ---- 眉：偏粗、平直（照片特征） ---- */
+    var browLift = -R * (0.015 + near * 0.045);
+    g.strokeStyle = mix(HAIR, '#000000', 0.25);
+    g.lineWidth = R * 0.115; g.lineCap = 'round';
+    for (var b = -1; b <= 1; b += 2) {
+      var bx0 = fx + b * R * 0.62, by0 = fy - R * 0.335 + browLift;
+      g.beginPath();
+      g.moveTo(bx0 - b * R * 0.20, by0 + R * 0.035);
+      g.quadraticCurveTo(bx0 + b * R * 0.06, by0 - R * 0.055, bx0 + b * R * 0.30, by0 + R * 0.015);
+      g.stroke();
+    }
+
+    /* ---- 眼 ---- */
+    var eyeX = R * 0.415, eyeY = -R * 0.085;
+    var eyeR = R * 0.215;
+    for (var s2 = -1; s2 <= 1; s2 += 2) {
+      var ex = fx + s2 * eyeX, ey = fy + eyeY;
+      var openY = 1;
+      if (blinking) {
+        var kk = blinkPhase < 0.5 ? blinkPhase * 2 : (1 - blinkPhase) * 2;
+        openY = 1 - kk * 0.95;
+      }
+      /* 眼型：略窄长，不画大圆眼（照片里眼型偏细长） */
+      g.fillStyle = '#f4f6fa';
+      g.beginPath(); g.ellipse(ex, ey, eyeR, eyeR * 0.88 * openY, 0, 0, Math.PI * 2); g.fill();
+      if (openY > 0.22) {
+        var ix = ex + nx * eyeR * 0.40, iy = ey + ny * eyeR * 0.36;
+        var ir = eyeR * (0.52 + near * 0.10);
+        var iris = g.createRadialGradient(ix - ir * 0.2, iy - ir * 0.25, ir * 0.1, ix, iy, ir);
+        iris.addColorStop(0, IRIS_HI); iris.addColorStop(0.55, IRIS); iris.addColorStop(1, IRIS_LO);
+        g.fillStyle = iris;
+        g.beginPath(); g.arc(ix, iy, ir, 0, Math.PI * 2); g.fill();
+        /* 瞳孔开大：靠近时更明显 */
+        g.fillStyle = '#07080c';
+        g.beginPath(); g.arc(ix, iy, ir * (0.50 + near * 0.14), 0, Math.PI * 2); g.fill();
+        g.fillStyle = rgba('#ffffff', 0.92);
+        g.beginPath(); g.arc(ix - ir * 0.32, iy - ir * 0.38, ir * 0.26, 0, Math.PI * 2); g.fill();
+        /* 上眼睑投影 */
+        g.fillStyle = rgba(SKIN_LO, 0.26);
+        g.beginPath(); g.ellipse(ex, ey - eyeR * 0.66 * openY, eyeR * 1.02, eyeR * 0.24 * openY, 0, 0, Math.PI * 2); g.fill();
+      }
+      /* 上睫毛线：一条细黑，让眼睛有神 */
+      g.strokeStyle = rgba('#14161d', 0.75); g.lineWidth = R * 0.030;
+      g.beginPath(); g.ellipse(ex, ey, eyeR, eyeR * 0.88 * openY, 0, Math.PI * 1.06, Math.PI * 1.94); g.stroke();
+    }
+
+    /* ---- 鼻 ---- */
+    g.strokeStyle = rgba(SKIN_LO, 0.50); g.lineWidth = R * 0.052; g.lineCap = 'round';
+    g.beginPath();
+    g.moveTo(fx + nx * R * 0.04, fy + R * 0.02);
+    g.quadraticCurveTo(fx + nx * R * 0.08, fy + R * 0.22, fx + R * 0.075, fy + R * 0.27);
+    g.stroke();
+    g.fillStyle = rgba(SKIN_LO, 0.22);
+    for (var n2 = -1; n2 <= 1; n2 += 2) {
+      g.beginPath(); g.ellipse(fx + n2 * R * 0.085, fy + R * 0.275, R * 0.045, R * 0.032, 0, 0, Math.PI * 2); g.fill();
+    }
+
+    /* ---- 唇：偏厚，唇色自然粉；微笑随指针 ---- */
+    var smile = 0.24 + ny * 0.18 + near * 0.26;
+    smile = Math.max(0.05, Math.min(0.72, smile));
+    var ly = fy + R * 0.545, lw = R * 0.30;
+    /* 下唇 */
+    var lg = g.createLinearGradient(0, ly - R * 0.06, 0, ly + R * 0.20);
+    lg.addColorStop(0, LIP); lg.addColorStop(0.6, LIP); lg.addColorStop(1, LIP_LO);
+    g.fillStyle = lg;
+    g.beginPath();
+    g.moveTo(fx - lw, ly);
+    g.quadraticCurveTo(fx - lw * 0.5, ly + R * (0.11 + smile * 0.10), fx, ly + R * (0.12 + smile * 0.12));
+    g.quadraticCurveTo(fx + lw * 0.5, ly + R * (0.11 + smile * 0.10), fx + lw, ly);
+    g.quadraticCurveTo(fx, ly + R * (0.05 + smile * 0.04), fx - lw, ly);
+    g.fill();
+    /* 上唇 */
+    g.fillStyle = LIP_HI;
+    g.beginPath();
+    g.moveTo(fx - lw, ly);
+    g.quadraticCurveTo(fx - lw * 0.45, ly - R * (0.10 + smile * 0.05), fx - R * 0.02, ly - R * 0.035);
+    g.quadraticCurveTo(fx + lw * 0.45, ly - R * (0.10 + smile * 0.05), fx + lw, ly);
+    g.quadraticCurveTo(fx, ly - R * 0.015, fx - lw, ly);
+    g.fill();
+    /* 唇缝 */
+    g.strokeStyle = rgba('#5e2b28', 0.85); g.lineWidth = R * 0.030;
+    g.beginPath();
+    g.moveTo(fx - lw * 0.94, ly);
+    g.quadraticCurveTo(fx, ly + smile * R * 0.10, fx + lw * 0.94, ly);
+    g.stroke();
+    /* 下唇高光 */
+    g.fillStyle = rgba('#ffffff', 0.16);
+    g.beginPath(); g.ellipse(fx, ly + R * 0.10, lw * 0.42, R * 0.030, 0, 0, Math.PI * 2); g.fill();
+
+    /* ---- 眼镜：最强识别点。黑上半圈 + 细银下半圈 + 鼻梁架 ---- */
+    var gx = fx, gy = fy + eyeY, gw = R * 0.60, gh = R * 0.50;
+    g.lineCap = 'round';
+    for (var s3 = -1; s3 <= 1; s3 += 2) {
+      var ox = gx + s3 * eyeX, lx = ox - gw / 2, rx2 = ox + gw / 2;
+      var ty2 = gy - gh / 2, by3 = gy + gh / 2, rr = R * 0.13;
+      /* 镜片轻微提亮 */
+      g.fillStyle = rgba('#dfe9ff', 0.07 + near * 0.05);
+      g.beginPath(); g.roundRect(lx, ty2, gw, gh, rr); g.fill();
+      /* 下半圈：细银 */
+      g.strokeStyle = FRAME_HI; g.lineWidth = R * 0.035;
+      g.beginPath(); g.roundRect(lx, ty2, gw, gh, rr); g.stroke();
+      /* 上半圈：粗黑（照片里是 browline 框型） */
+      g.strokeStyle = FRAME; g.lineWidth = R * 0.095;
+      g.beginPath();
+      g.moveTo(lx, gy - gh * 0.10);
+      g.quadraticCurveTo(lx, ty2, ox, ty2);
+      g.quadraticCurveTo(rx2, ty2, rx2, gy - gh * 0.10);
+      g.stroke();
+      /* 镜片高光 */
+      g.strokeStyle = rgba('#ffffff', 0.20); g.lineWidth = R * 0.030;
+      g.beginPath();
+      g.moveTo(lx + gw * 0.16, gy + gh * 0.16);
+      g.lineTo(lx + gw * 0.34, gy - gh * 0.14);
+      g.stroke();
+      /* 镜腿 */
+      g.strokeStyle = FRAME; g.lineWidth = R * 0.055;
+      g.beginPath();
+      g.moveTo(s3 < 0 ? lx : rx2, ty2 + gh * 0.16);
+      g.lineTo(s3 * R * 1.06, ty2 + gh * 0.06);
+      g.stroke();
+    }
+    /* 鼻梁架 */
+    g.strokeStyle = FRAME; g.lineWidth = R * 0.055;
+    g.beginPath();
+    g.moveTo(gx - eyeX + gw / 2, gy - gh * 0.16);
+    g.quadraticCurveTo(gx, gy - gh * 0.40, gx + eyeX - gw / 2, gy - gh * 0.16);
+    g.stroke();
+
+    /* ---- 腮红：靠近时才有温度 ---- */
+    if (near > 0.02) {
+      for (var c2 = -1; c2 <= 1; c2 += 2) {
+        var bx = fx + c2 * R * 0.66, by = fy + R * 0.30;
+        var bg = g.createRadialGradient(bx, by, 0, bx, by, R * 0.36);
+        bg.addColorStop(0, rgba('#d4635c', 0.22 * near));
+        bg.addColorStop(1, rgba('#d4635c', 0));
+        g.fillStyle = bg;
+        g.beginPath(); g.arc(bx, by, R * 0.36, 0, Math.PI * 2); g.fill();
+      }
+    }
+
+    /* ---- 前发：垂到额前的不规则碎发（视差最大的一层） ---- */
+    g.save();
+    g.translate(cx + nx * S * 0.052, cy + ny * S * 0.042);
+    g.fillStyle = HAIR;
+    /* 主体刘海：左偏，宽度不均 */
+    g.beginPath();
+    g.moveTo(-R * 1.08, -R * 0.02);
+    g.quadraticCurveTo(-R * 0.98, -R * 1.02, -R * 0.12, -R * 1.16);
+    g.quadraticCurveTo(R * 0.62, -R * 1.24, R * 0.94, -R * 0.52);
+    g.quadraticCurveTo(R * 0.52, -R * 0.86, R * 0.06, -R * 0.66);
+    g.quadraticCurveTo(-R * 0.30, -R * 0.50, -R * 0.54, -R * 0.84);
+    g.quadraticCurveTo(-R * 0.84, -R * 0.44, -R * 1.08, -R * 0.02);
+    g.closePath(); g.fill();
+    /* 额前几缕细碎发 */
+    g.strokeStyle = mix(HAIR, HAIR_HI, 0.35); g.lineCap = 'round';
+    for (var f = 0; f < 7; f++) {
+      var px = -R * 0.74 + f * R * 0.26;
+      g.lineWidth = R * 0.030;
+      strand(px, -R * (0.86 - (f % 3) * 0.10), R * (0.40 + (f % 2) * 0.16),
+             Math.PI * (0.62 + (f % 3) * 0.06), (f % 2 ? 0.5 : -0.4), g.lineWidth);
+    }
+    /* 翘起的呆毛 */
+    g.strokeStyle = HAIR; g.lineWidth = R * 0.055;
+    strand(-R * 0.10, -R * 1.14, R * 0.62, -Math.PI * 0.62, 0.7, R * 0.055);
+    strand(R * 0.22, -R * 1.10, R * 0.50, -Math.PI * 0.40, -0.6, R * 0.048);
+    g.restore();
+
+    /* ---- 底部渐隐：必须淡到完全透明，否则会在页面留下一个方块 ---- */
+    var fade = g.createLinearGradient(0, H * 0.80, 0, H);
+    fade.addColorStop(0, rgba('#08090c', 0));
+    fade.addColorStop(0.55, rgba('#08090c', 0.55));
+    fade.addColorStop(1, rgba('#08090c', 1));
+    g.fillStyle = fade;
+    g.fillRect(0, H * 0.80, W, H * 0.20);
+  }
+
+  function frame(now) {
+    rafId = requestAnimationFrame(frame);
+    var dt = Math.min(0.05, (now - last) / 1000 || 0.016);
+    last = now; t += dt;
+    nx += (tx - nx) * Math.min(1, dt * 6.5);
+    ny += (ty - ny) * Math.min(1, dt * 6.5);
+    if (blinking) {
+      blinkPhase += dt / 0.16;
+      if (blinkPhase >= 1) { blinking = 0; blinkPhase = 0; blinkAt = t + 1.8 + Math.random() * 3.6; }
+    } else if (t >= blinkAt) { blinking = 1; blinkPhase = 0; }
+    draw();
+  }
+  function start() { if (!rafId) { last = performance.now(); rafId = requestAnimationFrame(frame); } }
+  function stop() { if (rafId) { cancelAnimationFrame(rafId); rafId = 0; } }
+
+  window.addEventListener('pointermove', function (e) { aim(e.clientX, e.clientY); }, { passive: true });
+  window.addEventListener('resize', function () { resize(); }, { passive: true });
+  document.addEventListener('visibilitychange', function () { document.hidden ? stop() : start(); });
+
+  function ensure() {
+    var view = document.getElementById('view');
+    if (!view) return;
+    if (view.querySelector('.cc-hd')) { if (build()) start(); }
+    else if (host && host.parentNode) {
+      host.parentNode.removeChild(host);
+      host = null; cv = null; g = null; stop();
+    }
+  }
+  function begin() {
+    ensure();
+    var v = document.getElementById('view');
+    if (v) new MutationObserver(ensure).observe(v, { childList: true, subtree: false });
+    start();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', begin);
+  else begin();
 })();
 </script>
 <!-- ==== /VISUAL LAYER ==== -->
