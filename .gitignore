@@ -1,0 +1,10 @@
+# 第三方本地克隆（open-design，3.6GB，含自己的 .git），不进入本站仓库
+open-design/
+
+# 评审工具的临时产物
+.taste-skill/
+
+# 系统文件
+Thumbs.db
+desktop.ini
+.DS_Store

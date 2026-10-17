@@ -1215,7 +1215,7 @@ group('阶段五 5.5 PWA（manifest + Service Worker）',[
   ['页面头部包含 manifest、theme-color 与图标声明',async()=>{
     const link=D.querySelector('link[rel="manifest"]');
     assert(link&&/manifest\.webmanifest$/.test(link.getAttribute('href')),'应有 manifest 链接');
-    eq(D.querySelector('meta[name="theme-color"]').content,'#4f6ef7');
+    eq(D.querySelector('meta[name="theme-color"]').content,'#08090c');
     const icon=D.querySelector('link[rel="icon"]');
     assert(icon&&/icon\.svg$/.test(icon.getAttribute('href')),'应有 SVG 图标');
     eq(icon.type,'image/svg+xml');
