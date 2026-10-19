@@ -660,26 +660,133 @@ label.fl:has(+ #setTheme){display:none!important}
   #cursorGlow{display:none}
 }
 /* ================================================================
-   首屏伙伴：跟随指针的小人脸（由增强层注入，装饰性，不参与交互）
-   竖版画框：头 + 肩，下缘靠渐隐收边
+   首屏伙伴：真实照片的立体交互框（由增强层注入）
    ================================================================ */
-#heroBuddy{position:absolute;right:-6px;top:50%;transform:translateY(-52%);
-  width:206px;height:248px;pointer-events:none;z-index:0}
+#heroBuddy{position:absolute;right:-4px;top:50%;transform:translateY(-50%);
+  width:320px;height:400px;pointer-events:none;z-index:2}
+.hb-frame{width:100%;height:100%;border-radius:46% 46% 40% 40%/40% 40% 34% 34%;
+  overflow:hidden;transition:box-shadow .3s var(--t);
+  -webkit-mask-image:radial-gradient(78% 78% at 50% 42%,#000 52%,transparent 100%);
+  mask-image:radial-gradient(78% 78% at 50% 42%,#000 52%,transparent 100%)}
+.hb-inner{position:relative;width:100%;height:100%;will-change:transform;
+  transform-style:preserve-3d;transition:transform .12s linear}
+.hb-photo{width:100%;height:100%;object-fit:cover;object-position:50% 22%;
+  display:block;filter:saturate(1.04) contrast(1.03)}
+.hb-glare{position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(circle at 50% 50%,rgba(255,255,255,.10),rgba(255,255,255,0) 62%);
+  mix-blend-mode:screen}
+/* 照片底部渐隐，融进深色底而不是一刀切 */
+#heroBuddy::after{content:"";position:absolute;left:0;right:0;bottom:0;height:34%;
+  background:linear-gradient(180deg,transparent,#08090c 92%);pointer-events:none;border-radius:0 0 40% 40%}
 @media(max-width:1180px){
-  #heroBuddy{width:172px;height:208px;right:-8px}
+  #heroBuddy{width:250px;height:312px;right:-10px}
 }
 @media(max-width:860px){
-  #heroBuddy{width:132px;height:160px;right:-6px;opacity:.95}
+  #heroBuddy{width:180px;height:224px;right:-8px;opacity:.95}
 }
 @media(max-width:640px){
-  /* 窄屏标题几乎占满宽度，把它缩小并抬到标题右上角外侧 */
-  #heroBuddy{width:104px;height:126px;right:0;top:-8px;transform:none;opacity:.9}
+  #heroBuddy{width:128px;height:160px;right:0;top:-6px;transform:none;opacity:.9}
 }
+
+/* ================================================================
+   首页：第一屏 —— 问候语 + 今日计划卡
+   ================================================================ */
+.cc-greet{font-size:clamp(34px,4.4vw,60px);font-weight:700;letter-spacing:-.042em;
+  line-height:1.04;color:var(--ink-strong);
+  background:linear-gradient(178deg,#ffffff 34%,#b9c2d6 100%);
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+
+.cc-hero{position:relative;min-height:calc(100svh - 96px);display:flex;flex-direction:column;
+  justify-content:center;padding:8px 0 40px}
+
+.cc-plan-card{position:relative;z-index:1;background:var(--surface);border-radius:var(--r);
+  padding:22px 24px;max-width:620px}
+.cc-plan-head{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
+.cc-plan-head h3{font-size:15px;font-weight:650;color:var(--ink)}
+.cc-plan-head .cnt{font-variant-numeric:tabular-nums;color:var(--accent-ink);font-weight:650;font-size:13.5px}
+.cc-plan-head .sub{color:var(--ink-faint);font-size:12.5px;margin-left:auto}
+
+.cc-todo{list-style:none;margin:14px 0 0;max-height:min(34vh,300px);overflow-y:auto;
+  padding-right:4px;scrollbar-width:thin}
+.cc-todo li{display:flex;align-items:flex-start;gap:11px;padding:9px 2px;
+  border-bottom:1px solid var(--rule)}
+.cc-todo li:last-child{border-bottom:none}
+.cc-todo li.done .tx{color:var(--ink-faint);text-decoration:line-through}
+.cc-todo .ck{margin-top:3px;width:17px;height:17px;accent-color:var(--accent);cursor:pointer;flex:none}
+.cc-todo .tx{flex:1;min-width:0;font-size:14.5px;line-height:1.5}
+.cc-todo .tm{flex:none;font-size:12px;color:var(--ink-faint);
+  font-variant-numeric:tabular-nums;padding-top:2px}
+.cc-todo .empty-row{color:var(--ink-faint);font-size:13.5px;padding:16px 2px;text-align:center;
+  border-bottom:none;display:block}
+
+/* 内联快速添加：回车即存 */
+.cc-quickadd{display:flex;gap:8px;margin-top:14px}
+.cc-quickadd input{flex:1;min-width:0;padding:10px 12px;border-radius:var(--r-sm);outline:none;
+  background:var(--sunken);border:1px solid transparent;color:var(--ink);font-size:14px;
+  transition:border-color .2s var(--t),background .2s var(--t),box-shadow .2s var(--t)}
+.cc-quickadd input::placeholder{color:var(--ink-faint)}
+.cc-quickadd input:focus{border-color:color-mix(in srgb,var(--accent) 60%,transparent);
+  background:var(--raised);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 14%,transparent)}
+
+.cc-more-link{display:inline-flex;align-items:center;gap:5px;margin-top:14px;
+  font-size:13px;color:var(--ink-mute);transition:color .2s var(--t),gap .2s var(--t)}
+.cc-more-link:hover{color:var(--accent-ink);gap:9px}
+
+/* ================================================================
+   首页：导语（滚动揭示，用 CSS mask 实现，文本在 DOM 里只有一份）
+   ================================================================ */
+.cc-lead{margin:6px 0 88px;font-size:clamp(19px,2.2vw,27px);font-weight:300;
+  letter-spacing:-.012em;line-height:1.5;color:var(--ink-mute);max-width:34ch}
+
+/* ================================================================
+   首页：第二屏 —— 日历 + 当日待办（首页直接写，不跳页）
+   ================================================================ */
+.cc-cal-screen{padding:8px 0 96px}
+.cc-cal-head{display:flex;align-items:center;gap:10px;margin-bottom:18px}
+.cc-cal-head .mon{font-size:19px;font-weight:650;letter-spacing:-.01em;
+  color:var(--ink-strong);font-variant-numeric:tabular-nums}
+.cc-cal-head .nav-btn{width:34px;height:34px;border-radius:var(--r-sm);background:var(--raised);
+  color:var(--ink-mute);display:grid;place-items:center;font-size:15px;
+  transition:background .2s var(--t),color .2s var(--t)}
+.cc-cal-head .nav-btn:hover{background:color-mix(in srgb,var(--accent) 18%,var(--raised));color:var(--ink)}
+.cc-cal-head .today-btn{margin-left:auto;padding:7px 14px;border-radius:99px;
+  background:var(--accent-wash);color:var(--accent-ink);font-size:12.5px;font-weight:600;
+  transition:background .2s var(--t)}
+.cc-cal-head .today-btn:hover{background:color-mix(in srgb,var(--accent) 26%,transparent)}
+
+.cc-cal-wrap{background:var(--surface);border-radius:var(--r);padding:18px;max-width:560px}
+.cc-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.cc-cal-hd{text-align:center;font-size:11.5px;font-weight:600;color:var(--ink-faint);padding:6px 0}
+.cc-cal-d{position:relative;aspect-ratio:1/1;border-radius:var(--r-sm);border:none;
+  background:transparent;color:var(--ink);font-size:13.5px;cursor:pointer;padding:0;
+  font-variant-numeric:tabular-nums;
+  transition:background .18s var(--t),color .18s var(--t),transform .18s var(--t-out)}
+.cc-cal-d:hover{background:var(--raised);transform:scale(1.06)}
+.cc-cal-d.out{color:var(--ink-faint);opacity:.4}
+.cc-cal-d.td{background:var(--accent-wash);color:var(--accent-ink);font-weight:650}
+.cc-cal-d.sel{background:var(--accent);color:var(--on-accent);font-weight:650;
+  box-shadow:0 0 18px -4px color-mix(in srgb,var(--accent) 80%,transparent)}
+.cc-cal-d.has::after{content:"";position:absolute;left:50%;bottom:5px;transform:translateX(-50%);
+  width:4px;height:4px;border-radius:50%;background:var(--good)}
+.cc-cal-d.sel::after{background:var(--on-accent)}
+
+.cc-day-panel{margin-top:18px;max-width:560px}
+.cc-day-panel h3{font-size:14px;font-weight:650;color:var(--ink);margin-bottom:4px}
+.cc-day-panel .hint{font-size:12.5px;color:var(--ink-faint);margin-bottom:12px}
+
+/* ================================================================
+   首页：第三屏起 —— 四张入口卡滚动堆叠
+   ================================================================ */
+.cc-stack{padding:0 0 120px;max-width:760px}
+.cc-stack-item{position:sticky;margin-bottom:18px;
+  transform-origin:50% 0%}
+.cc-stack-item .cc-card{display:flex;flex-direction:column;align-items:flex-start;
+  gap:8px;text-align:left;width:100%;padding:26px 28px;
+  transform:none!important}
+.cc-stack-item .cc-card .cc-name{font-size:15px}
+.cc-stack-item .cc-card .cc-status{font-size:clamp(28px,3vw,38px)}
 @media(prefers-reduced-motion:reduce){
-  #heroBuddy{display:none}
-}
-@media(hover:none){
-  #heroBuddy{display:none}
+  .cc-stack-item{position:static;transform:none!important}
 }
 
 /* ========== 侧边导航（与纸面对比的素面栏） ========== */
@@ -1321,8 +1428,49 @@ function go(v){
 ================================================================ */
 const views={};
 
+/* ---------- 首页日历状态（只在本次浏览内有效，不写存储） ---------- */
+const homeCal={view:'',sel:''};
+function calEnsure(t){
+  if(!homeCal.view) homeCal.view=t.slice(0,7)+'-01';
+  if(!homeCal.sel) homeCal.sel=t;
+}
+function calPad(y,m,d){
+  while(m<1){m+=12;y--;} while(m>12){m-=12;y++;}
+  return y+'-'+String(m).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+}
+function calCells(view){
+  const y=+view.slice(0,4), m=+view.slice(5,7);
+  const firstWd=(new Date(y,m-1,1).getDay()+6)%7;   /* 周一为每周首 */
+  const dim=new Date(y,m,0).getDate();
+  const prevDim=new Date(y,m-1,0).getDate();
+  const cells=[];
+  for(let i=firstWd-1;i>=0;i--) cells.push({d:calPad(y,m-1,prevDim-i),out:true});
+  for(let d=1;d<=dim;d++) cells.push({d:calPad(y,m,d),out:false});
+  const total=Math.ceil(cells.length/7)*7; let nd=1;
+  while(cells.length<total) cells.push({d:calPad(y,m+1,nd++),out:true});
+  return cells;
+}
+/* 某天是否有安排（任务或已打卡习惯） */
+function calHas(dstr){
+  const tk=(S.tasks[dstr]||[]).length>0;
+  if(tk) return true;
+  return S.habits.some(h=>(h.checks||[]).indexOf(dstr)>=0);
+}
+/* 某天的待办行 */
+function todoRows(dstr,limit){
+  const list=tasksOf(dstr).slice().sort((a,b)=>(a.time||'99').localeCompare(b.time||'99'));
+  const show=limit?list.slice(0,limit):list;
+  if(!list.length) return '<li class="empty-row">这一天还没有安排</li>';
+  return show.map(x=>`<li class="${x.done?'done':''}">
+      <input type="checkbox" class="ck" data-act="task-toggle" data-date="${dstr}" data-id="${x.id}" ${x.done?'checked':''}>
+      <span class="tx">${esc(x.text)}</span>
+      ${x.time?`<span class="tm">${esc(x.time)}</span>`:''}
+    </li>`).join('');
+}
+
 views.home=function(){
   const t=today();
+  calEnsure(t);
   const {done,all}=doneCount(t);
   const pct=all?Math.round(done/all*100):0;
   const hour=new Date().getHours();
@@ -1340,16 +1488,81 @@ views.home=function(){
     <button class="btn sm ghost" data-act="backup-snooze">今天不再提示</button>
   </div>`:'';
 
+  /* 导语：用真实状态，不是装饰文案 */
+  const lead = all
+    ? (done===all ? `今天 ${all} 件事，已经全部划掉。`
+                  : `今天 ${all} 件事，已划掉 ${done} 件，还剩 ${all-done} 件。`)
+    : '今天还没有安排，先记一件事吧。';
+
+  /* 日历 */
+  const sel=homeCal.sel;
+  const vy=+homeCal.view.slice(0,4), vm=+homeCal.view.slice(5,7);
+  const cells=calCells(homeCal.view);
+  const weekHd=['一','二','三','四','五','六','日'].map(w=>`<div class="cc-cal-hd">${w}</div>`).join('');
+  const calDoms=cells.map(c=>{
+    const cls=['cc-cal-d'];
+    if(c.out) cls.push('out');
+    if(c.d===t) cls.push('td');
+    if(c.d===sel) cls.push('sel');
+    if(calHas(c.d)) cls.push('has');
+    return `<button class="${cls.join(' ')}" data-act="hcal-pick" data-date="${c.d}">${+c.d.slice(8)}</button>`;
+  }).join('');
+
+  const selList=tasksOf(sel).length;
+
   $('#view').innerHTML=`
   <section class="cc-hero">
     <div class="cc-hd">
-      <h2>${greet}${S.settings.name?'，'+esc(S.settings.name):''}</h2>
+      <p class="cc-greet">${greet}${S.settings.name?'，'+esc(S.settings.name):''}</p>
       <div class="cc-day">${fullCN(t)}</div>
     </div>
-    <div class="cc-acts">
-      <button class="btn lg" data-act="task-add" data-date="${t}">添加今天的任务</button>
+
+    <div class="cc-plan-card">
+      <div class="cc-plan-head">
+        <h3>今日计划</h3>
+        <span class="cnt">${done}/${all}</span>
+        <span class="sub">已完成 ${pct}%</span>
+      </div>
+      <div class="pg"><i style="width:${pct}%"></i></div>
+      <ul class="cc-todo">${todoRows(t,50)}</ul>
+      <div class="cc-quickadd">
+        <input id="homeQuickAdd" placeholder="加一件事，回车保存" autocomplete="off">
+        <button class="btn sm" data-act="home-add" data-date="${t}">记下</button>
+      </div>
+      <a class="cc-more-link" href="#" data-nav="plan">查看全部与编辑 →</a>
     </div>
-    <div class="cc-grid">
+  </section>
+
+  <p class="cc-lead" data-mask-reveal>${esc(lead)}</p>
+
+  <div class="cc-cal-screen">
+    <div class="cc-cal-head">
+      <button class="nav-btn" data-act="hcal-prev" aria-label="上个月">‹</button>
+      <span class="mon">${vy} 年 ${vm} 月</span>
+      <button class="nav-btn" data-act="hcal-next" aria-label="下个月">›</button>
+      <button class="today-btn" data-act="hcal-today">回到今天</button>
+    </div>
+
+    <div class="cc-cal-wrap">
+      <div class="cc-cal-grid">
+        ${weekHd}
+        ${calDoms}
+      </div>
+    </div>
+
+    <div class="cc-day-panel">
+      <h3>${md(sel)}${sel===t?' · 今天':''}</h3>
+      <div class="hint">${selList?`这一天有 ${selList} 项安排`:'这一天还是空的'}</div>
+      <ul class="cc-todo">${todoRows(sel,80)}</ul>
+      <div class="cc-quickadd">
+        <input id="calQuickAdd" placeholder="给这一天加一件事，回车保存" autocomplete="off">
+        <button class="btn sm" data-act="hcal-add" data-date="${sel}">记下</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="cc-stack">
+    <div class="cc-stack-item" style="top:86px">
       <button class="cc-card" data-nav="plan">
         <span class="cc-name">今日计划</span>
         <span class="cc-status">${done}/${all}</span>
@@ -1357,18 +1570,24 @@ views.home=function(){
         <div class="pg"><i style="width:${pct}%"></i></div>
         <span class="cc-desc">把今天要做的事收进清单，完成一件划掉一件。</span>
       </button>
+    </div>
+    <div class="cc-stack-item" style="top:108px">
       <button class="cc-card" data-nav="media">
         <span class="cc-name">自媒体</span>
         <span class="cc-status">${ready}</span>
         <span class="cc-note">条待发布 · 已发布 ${pub} 条</span>
         <span class="cc-desc">选题、内容流水线和数据看板，一处管到底。</span>
       </button>
+    </div>
+    <div class="cc-stack-item" style="top:130px">
       <button class="cc-card" data-nav="diary">
         <span class="cc-name">日记习惯</span>
         <span class="cc-status">${hbDone}/${hbs.length}</span>
         <span class="cc-note">${hbs.length?(hbDone===hbs.length?'今日已全部打卡':'今日待打卡 '+(hbs.length-hbDone)+' 项'):'还没有添加习惯'}</span>
         <span class="cc-desc">写下今天的心情，顺手给习惯打个卡。</span>
       </button>
+    </div>
+    <div class="cc-stack-item" style="top:152px">
       <button class="cc-card" data-nav="fitness">
         <span class="cc-name">健身计划</span>
         <span class="cc-status txt">${esc(fitToday)}</span>
@@ -1376,7 +1595,7 @@ views.home=function(){
         <span class="cc-desc">按周安排训练，记录重量与身体变化。</span>
       </button>
     </div>
-  </section>
+  </div>
 
   ${backupBanner}`;
 };
@@ -2117,6 +2336,33 @@ async function doAct(a,b){
       S.quickNotes.push({id:uid(),text,t:Date.now(),d:today()}); save(); go('home'); toast('已记下');
       break;
     }
+    /* 首页 / 日历的内联添加与切月 */
+    case'home-add':{
+      const inp=$('#homeQuickAdd');
+      const text=(inp?inp.value:'').trim();
+      if(!text){ toast('先写点什么'); if(inp)inp.focus(); return; }
+      (S.tasks[d||today()]=S.tasks[d||today()]||[]).push({id:uid(),text,time:'',pri:'中',note:'',done:false});
+      save(); go('home'); toast('已记下');
+      break;
+    }
+    case'hcal-add':{
+      const inp=$('#calQuickAdd');
+      const text=(inp?inp.value:'').trim();
+      if(!text){ toast('先写点什么'); if(inp)inp.focus(); return; }
+      (S.tasks[d]=S.tasks[d]||[]).push({id:uid(),text,time:'',pri:'中',note:'',done:false});
+      save(); go('home'); toast('已加到 '+md(d));
+      break;
+    }
+    case'hcal-pick':{ homeCal.sel=d; go('home'); break; }
+    case'hcal-prev':{
+      const y=+homeCal.view.slice(0,4), m=+homeCal.view.slice(5,7);
+      homeCal.view=(m===1?calPad(y-1,12,1):calPad(y,m-1,1)); go('home'); break;
+    }
+    case'hcal-next':{
+      const y=+homeCal.view.slice(0,4), m=+homeCal.view.slice(5,7);
+      homeCal.view=(m===12?calPad(y+1,1,1):calPad(y,m+1,1)); go('home'); break;
+    }
+    case'hcal-today':{ homeCal.view=today().slice(0,7)+'-01'; homeCal.sel=today(); go('home'); break; }
     /* 今日计划 */
     case'task-add':{
       const v=await openModal('添加任务 · '+md(d),[
@@ -2887,6 +3133,78 @@ if('serviceWorker' in navigator&&/^https?:$/.test(location.protocol)){
      想要单色图标，应当在应用的渲染函数里改，而不是在这里重写文本节点。
      emoji 的外观由 .cc-name / .card h3 的 CSS 降噪处理。 */
 
+  /* ---------- 8. 首页卡片堆叠：后一张盖上来的过程中，前一张逐渐缩小 ---------- */
+  function initStack(){
+    if (reduced) return;
+    var items = document.querySelectorAll('.cc-stack-item');
+    if (!items.length) return;
+
+    function upd(){
+      var vh = window.innerHeight;
+      for (var i = 0; i < items.length; i++){
+        var el = items[i];
+        var next = items[i + 1];
+        // 下一张卡从视口底部上升到它自己的粘性位置，就是"覆盖进度"
+        var nextTop = next ? next.getBoundingClientRect().top : vh;
+        var stickTop = next ? (parseFloat(next.style.top) || 110) : 110;
+        var span = vh - stickTop;
+        var p = span > 0 ? Math.min(1, Math.max(0, (vh - nextTop) / span)) : 0;
+        var scale = 1 - p * 0.055;
+        el.style.transform = 'scale(' + scale.toFixed(3) + ')';
+        el.style.opacity = (1 - p * 0.35).toFixed(3);
+      }
+    }
+
+    var ticking = false;
+    window.addEventListener('scroll', function(){
+      if (!ticking){ ticking = true; requestAnimationFrame(function(){ ticking = false; upd(); }); }
+    }, { passive: true });
+    window.addEventListener('resize', upd, { passive: true });
+    upd();
+  }
+
+  /* ---------- 9. 导语：滚动驱动的文字揭示（遮罩，文本只有一份） ---------- */
+  function initMaskReveal(){
+    if (reduced) return;
+    var els = document.querySelectorAll('[data-mask-reveal]');
+    if (!els.length) return;
+
+    function upd(){
+      var vh = window.innerHeight;
+      for (var i = 0; i < els.length; i++){
+        var r = els[i].getBoundingClientRect();
+        var start = vh * 0.88, end = vh * 0.38;
+        var p = Math.min(1, Math.max(0, (start - r.top) / (start - end)));
+        var head = (p * 100).toFixed(1);
+        var tail = Math.min(100, p * 100 + 16).toFixed(1);
+        var m = 'linear-gradient(100deg,rgba(0,0,0,1) 0%,rgba(0,0,0,1) ' + head +
+                '%,rgba(0,0,0,.14) ' + tail + '%,rgba(0,0,0,.14) 100%)';
+        els[i].style.maskImage = m;
+        els[i].style.webkitMaskImage = m;
+      }
+    }
+
+    var ticking = false;
+    window.addEventListener('scroll', function(){
+      if (!ticking){ ticking = true; requestAnimationFrame(function(){ ticking = false; upd(); }); }
+    }, { passive: true });
+    upd();
+  }
+
+  /* ---------- 10. 首页两个内联输入：回车即提交 ---------- */
+  function initQuickAdd(){
+    document.addEventListener('keydown', function(e){
+      if (e.key !== 'Enter') return;
+      var el = e.target;
+      if (!el || !el.id) return;
+      if (el.id !== 'homeQuickAdd' && el.id !== 'calQuickAdd') return;
+      e.preventDefault();
+      var wrap = el.parentNode;
+      var btn = wrap && wrap.querySelector('[data-act]');
+      if (btn) btn.click();
+    });
+  }
+
   /* ---------- 启动 ---------- */
   function boot(){
     addAtmos();
@@ -2895,6 +3213,9 @@ if('serviceWorker' in navigator&&/^https?:$/.test(location.protocol)){
     initReveal();
     initTilt();
     initMagnet();
+    initStack();
+    initMaskReveal();
+    initQuickAdd();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
@@ -2902,446 +3223,147 @@ if('serviceWorker' in navigator&&/^https?:$/.test(location.protocol)){
 </script>
 <script>
 /* ================================================================
-   首屏伙伴：以本人照片为原型的卡通小人脸，跟随指针而动
+   首屏伙伴：用真实照片做立体交互（v2，替换原 Canvas 手绘脸）
    ----------------------------------------------------------------
-   抓取的特征（按辨识度排序）：
-     1. 蓬乱上翘的黑发，发丝朝多个方向散开，中分偏不规则
-     2. 黑框眉线眼镜（上半圈粗黑、下半圈细银），这是最强识别点
-     3. 深色瞳仁、略粗的眉、鼻梁有肉、唇形偏厚、唇色自然粉
-     4. 黑色 T 恤领口
-   手法：原生 Canvas 2D + 多层渐变塑形 + 分层视差（脸/五官/前发不同系数）
-   零依赖、约 14KB、完全离线。reduced-motion 与触屏下不生成。
+   为什么换成照片：手绘 Canvas 卡通脸达不到"高级感"的门槛。
+   照片 + 透视变换 + 跟随光照，能产生真实的体积感，而且就是本人。
+
+   手法（原生，零依赖）：
+     1. 头部绕 Y/X 轴微转（±6°），透视深度 900px
+     2. 跟随光斑：径向高光随指针移动，模拟光源方向变化
+     3. 照片边缘径向遮罩淡出，融入深色页面而不是贴一块方块
+     4. 靠近时轻微推近；转离指针的一侧压暗，强化体积感
+
+   素材：assets/portrait-1x.jpg / portrait-2x.jpg
+   性能：静止时停掉 rAF；reduced-motion 与触屏下只显示静态照片。
    ================================================================ */
 (function () {
   'use strict';
-  if (!window.matchMedia) return;
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  if (window.matchMedia('(hover: none)').matches) return;
 
   var ID = 'heroBuddy';
-  var rafId = 0, cv = null, g = null, host = null, dpr = 1, t = 0, last = 0;
+  var MAX_ROT = 6;        // 最大旋转角（度）
+  var MAX_PUSH = 1.035;   // 靠近时最大放大
 
-  /* 指针：目标与插值位置（-1..1）；near = 靠近程度 */
+  var host = null, frame = null, inner = null, glare = null;
   var tx = 0, ty = 0, nx = 0, ny = 0, near = 0;
-  var blinkAt = 1.2, blinkPhase = 0, blinking = 0;
+  var rafId = 0;
 
-  /* ---------------- 配色：取自照片 ---------------- */
-  var SKIN_HI = '#f2d3b6', SKIN = '#e6b894', SKIN_MID = '#d9a179', SKIN_LO = '#b0764f';
-  var HAIR_HI = '#3a3d4a', HAIR = '#212430', HAIR_LO = '#12141c';
-  var FRAME = '#191b22', FRAME_HI = '#4a4e5c';   // 镜框：黑上半圈 + 细银下半圈
-  var IRIS_HI = '#6b4a33', IRIS = '#3a271c', IRIS_LO = '#1a1009';
-  var LIP_HI = '#c9776e', LIP = '#b0605a', LIP_LO = '#8a4440';
-  var SHIRT_HI = '#2b2e38', SHIRT = '#1c1f27', SHIRT_LO = '#101219';
-
-  function rgba(hex, a) {
-    var h = String(hex).replace('#', '');
-    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
-    var n = parseInt(h, 16);
-    if (isNaN(n)) return 'rgba(255,255,255,' + a + ')';
-    return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
-  }
-  function mix(a, b, k) {
-    var pa = parseInt(a.replace('#', ''), 16), pb = parseInt(b.replace('#', ''), 16);
-    var r = Math.round((((pa >> 16) & 255) * (1 - k)) + (((pb >> 16) & 255) * k));
-    var gg = Math.round((((pa >> 8) & 255) * (1 - k)) + (((pb >> 8) & 255) * k));
-    var bl = Math.round(((pa & 255) * (1 - k)) + ((pb & 255) * k));
-    return 'rgb(' + r + ',' + gg + ',' + bl + ')';
-  }
-  function accent() {
-    var v = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
-    return v || '#7c95ff';
-  }
+  var reduced = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  var coarse = !!(window.matchMedia && window.matchMedia('(hover: none)').matches);
+  var animated = !reduced && !coarse;
 
   function build() {
     var hd = document.querySelector('.cc-hd');
     if (!hd) return false;
     if (hd.querySelector('#' + ID)) return true;
+
     host = document.createElement('div');
     host.id = ID;
     host.setAttribute('aria-hidden', 'true');
-    cv = document.createElement('canvas');
-    cv.style.cssText = 'width:100%;height:100%;display:block';
-    host.appendChild(cv);
+    host.innerHTML =
+      '<div class="hb-frame">' +
+        '<div class="hb-inner">' +
+          '<img class="hb-photo" alt="" draggable="false"' +
+               ' src="assets/portrait-1x.jpg"' +
+               ' srcset="assets/portrait-1x.jpg 420w, assets/portrait-2x.jpg 760w"' +
+               ' sizes="(max-width: 860px) 176px, 320px">' +
+          '<span class="hb-glare"></span>' +
+        '</div>' +
+      '</div>';
+
     hd.appendChild(host);
-    g = cv.getContext('2d');
-    resize();
+    frame = host.querySelector('.hb-frame');
+    inner = host.querySelector('.hb-inner');
+    glare = host.querySelector('.hb-glare');
     return true;
   }
-  function resize() {
-    if (!cv) return;
-    /* 画布按 CSS 像素的 2 倍起，保证线条与镜框不糊（上限 3 倍，避免大屏过重） */
-    dpr = Math.min(3, Math.max(2, window.devicePixelRatio || 1));
-    var r = host.getBoundingClientRect();
-    var w = Math.max(60, Math.round(r.width || 206));
-    var h = Math.max(60, Math.round(r.height || 248));
-    cv.width = Math.round(w * dpr);
-    cv.height = Math.round(h * dpr);
-  }
+
   function aim(cx, cy) {
     if (!host) return;
     var r = host.getBoundingClientRect();
     if (!r.width) return;
     var mx = r.left + r.width / 2, my = r.top + r.height / 2;
-    var dx = (cx - mx) / (r.width * 0.8), dy = (cy - my) / (r.height * 0.8);
-    var d = Math.sqrt(dx * dx + dy * dy) || 1;
-    var k = Math.min(1, d);
-    tx = (dx / d) * k; ty = (dy / d) * k;
+
+    tx = Math.max(-1, Math.min(1, (cx - mx) / (window.innerWidth * 0.5)));
+    ty = Math.max(-1, Math.min(1, (cy - my) / (window.innerHeight * 0.5)));
+
     var dist = Math.sqrt((cx - mx) * (cx - mx) + (cy - my) * (cy - my));
-    near += ((dist < r.width * 1.35 ? 1 : 0) - near) * 0.07;
+    near += ((dist < r.width * 1.4 ? 1 : 0) - near) * 0.08;
+    wake();
   }
 
-  /* 一簇头发：三次贝塞尔，方向和弯曲可调 */
-  function strand(x, y, len, ang, curl, w) {
-    var ex = x + Math.cos(ang) * len, ey = y + Math.sin(ang) * len;
-    var mx = x + Math.cos(ang + curl) * len * 0.55, my = y + Math.sin(ang + curl) * len * 0.55;
-    g.beginPath();
-    g.moveTo(x, y);
-    g.quadraticCurveTo(mx, my, ex, ey);
-    g.lineWidth = w; g.stroke();
+  function render() {
+    if (!inner) return;
+
+    nx += (tx - nx) * 0.10;
+    ny += (ty - ny) * 0.10;
+
+    var ry = nx * MAX_ROT;              // 指针在右 → 向右转
+    var rx = -ny * MAX_ROT * 0.7;
+    var push = 1 + (MAX_PUSH - 1) * near;
+
+    inner.style.transform =
+      'perspective(900px) rotateY(' + ry.toFixed(2) + 'deg) rotateX(' + rx.toFixed(2) +
+      'deg) scale(' + push.toFixed(3) + ')';
+
+    if (glare) {
+      var gx = (50 + nx * 30).toFixed(1);
+      var gy = (50 + ny * 30).toFixed(1);
+      glare.style.background =
+        'radial-gradient(circle at ' + gx + '% ' + gy + '%,' +
+        'rgba(255,255,255,' + (0.10 + near * 0.10).toFixed(3) + ') 0%,' +
+        'rgba(255,255,255,' + (0.03 + near * 0.04).toFixed(3) + ') 32%,' +
+        'rgba(255,255,255,0) 62%)';
+    }
+    if (frame) {
+      frame.style.boxShadow =
+        (nx * 10).toFixed(1) + 'px ' + (ny * 8).toFixed(1) + 'px 40px rgba(0,0,0,.55)';
+    }
   }
 
-  function draw() {
-    if (!g) return;
-    var W = cv.width / dpr, H = cv.height / dpr;
-    g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.clearRect(0, 0, W, H);
-
-    var A = accent();
-    var S = Math.min(W, H);
-    /* 头基准半径：占短边约 30%，让脸充满画框而不是缩在中间 */
-    var R = S * 0.295;
-    var cx = W * 0.50 + nx * S * 0.028;
-    var cy = H * 0.455 + Math.sin(t * 1.05) * S * 0.009 + ny * S * 0.022;
-
-    /* ---- 背光光晕：呼应站内强调色 ---- */
-    var glow = g.createRadialGradient(cx, cy, R * 0.7, cx, cy, R * 2.4);
-    glow.addColorStop(0, rgba(A, 0.20 + near * 0.16));
-    glow.addColorStop(0.5, rgba(A, 0.06 + near * 0.06));
-    glow.addColorStop(1, rgba(A, 0));
-    g.fillStyle = glow;
-    g.beginPath(); g.arc(cx, cy, R * 2.4, 0, Math.PI * 2); g.fill();
-
-    /* ---- 肩与黑色领口（先画，被头压住；下缘故意超出画布，靠渐隐收边） ---- */
-    var sy = cy + R * 1.50;
-    var sg = g.createLinearGradient(0, sy - R * 0.4, 0, sy + R * 1.4);
-    sg.addColorStop(0, SHIRT_HI); sg.addColorStop(0.55, SHIRT); sg.addColorStop(1, SHIRT_LO);
-    g.fillStyle = sg;
-    g.beginPath();
-    g.moveTo(cx - R * 1.96, sy + R * 1.70);
-    g.quadraticCurveTo(cx - R * 1.42, sy - R * 0.16, cx - R * 0.38, sy - R * 0.30);
-    g.quadraticCurveTo(cx, sy + R * 0.12, cx + R * 0.38, sy - R * 0.30);
-    g.quadraticCurveTo(cx + R * 1.42, sy - R * 0.16, cx + R * 1.96, sy + R * 1.70);
-    g.closePath(); g.fill();
-    /* 领口暗部 */
-    g.fillStyle = rgba('#05060a', 0.55);
-    g.beginPath();
-    g.moveTo(cx - R * 0.38, sy - R * 0.30);
-    g.quadraticCurveTo(cx, sy + R * 0.18, cx + R * 0.38, sy - R * 0.30);
-    g.quadraticCurveTo(cx, sy + R * 0.52, cx - R * 0.38, sy - R * 0.30);
-    g.fill();
-
-    /* ---- 脖子 ---- */
-    var neck = g.createLinearGradient(0, cy + R * 0.6, 0, sy);
-    neck.addColorStop(0, mix(SKIN, SKIN_LO, 0.42));
-    neck.addColorStop(1, mix(SKIN, SKIN_LO, 0.24));
-    g.fillStyle = neck;
-    g.beginPath();
-    g.moveTo(cx - R * 0.42, cy + R * 0.70);
-    g.lineTo(cx - R * 0.46, sy - R * 0.06);
-    g.quadraticCurveTo(cx, sy + R * 0.16, cx + R * 0.46, sy - R * 0.06);
-    g.lineTo(cx + R * 0.42, cy + R * 0.70);
-    g.closePath(); g.fill();
-
-    /* ---- 后发（最底层，蓬松轮廓） ---- */
-    g.save();
-    g.translate(cx + nx * S * 0.010, cy + ny * S * 0.008);
-    var hg = g.createLinearGradient(0, -R * 1.9, 0, R * 1.3);
-    hg.addColorStop(0, HAIR_HI); hg.addColorStop(0.5, HAIR); hg.addColorStop(1, HAIR_LO);
-    g.fillStyle = hg;
-    g.beginPath();
-    g.ellipse(0, -R * 0.30, R * 1.24, R * 1.26, 0, 0, Math.PI * 2);
-    g.fill();
-    /* 两侧蓬出去的体积 */
-    for (var s = -1; s <= 1; s += 2) {
-      g.beginPath();
-      g.ellipse(s * R * 0.96, -R * 0.10, R * 0.40, R * 0.66, s * 0.20, 0, Math.PI * 2);
-      g.fill();
-    }
-    /* 蓬松轮廓：7 团相互重叠的平滑发块，拼出不规则外轮廓（比放射尖刺更像真发），
-       外层随时间极缓起伏，模拟发丝自身的飘动 */
-    g.fillStyle = HAIR;
-    var MASS = [
-      /* [角度, 距离, 半径x, 半径y, 旋转, 相位] */
-      [-Math.PI * 0.50, 1.06, 0.52, 0.46, 0.00, 0.0],
-      [-Math.PI * 0.72, 1.10, 0.50, 0.44, -0.35, 1.7],
-      [-Math.PI * 0.28, 1.10, 0.50, 0.44, 0.35, 3.1],
-      [-Math.PI * 0.94, 1.00, 0.44, 0.52, -0.55, 2.2],
-      [-Math.PI * 0.06, 1.00, 0.44, 0.52, 0.55, 4.4],
-      [-Math.PI * 1.10, 0.84, 0.36, 0.46, -0.70, 5.5],
-      [Math.PI * 0.10, 0.84, 0.36, 0.46, 0.70, 0.9]
-    ];
-    for (var mi = 0; mi < MASS.length; mi++) {
-      var M = MASS[mi];
-      var breathe = 1 + Math.sin(t * 0.9 + M[5]) * 0.018;
-      var mxp = Math.cos(M[0]) * R * M[1];
-      var myp = Math.sin(M[0]) * R * M[1] - R * 0.20;
-      g.beginPath();
-      g.ellipse(mxp, myp, R * M[2] * breathe, R * M[3] * breathe, M[4], 0, Math.PI * 2);
-      g.fill();
-    }
-    /* 顶部一撮略高的隆起，避免过于对称 */
-    g.beginPath();
-    g.ellipse(-R * 0.16, -R * 1.30, R * 0.40, R * 0.26, -0.18, 0, Math.PI * 2);
-    g.fill();
-    /* 少量翘出的细发丝：只做点缀，不铺满一圈 */
-    g.strokeStyle = mix(HAIR, HAIR_HI, 0.30); g.lineCap = 'round';
-    var WISP = [[-0.86, 0.52, 0.30], [-0.30, 0.56, -0.34], [0.20, 0.50, 0.26],
-                [-1.02, 0.44, -0.42], [0.55, 0.40, 0.38], [-0.05, 0.58, 0.20]];
-    for (var wi = 0; wi < WISP.length; wi++) {
-      var wa = Math.PI * (0.5 + WISP[wi][0] * 0.5) + Math.PI * 0.5;
-      var sw = Math.sin(t * 0.7 + wi * 1.9) * 0.10;
-      g.lineWidth = R * 0.038;
-      strand(Math.cos(wa) * R * 1.00, Math.sin(wa) * R * 1.02 - R * 0.22,
-             R * WISP[wi][1], wa + WISP[wi][2] + sw, (wi % 2 ? 0.6 : -0.6), g.lineWidth);
-    }
-    g.restore();
-
-    /* ---- 脸 ---- */
-    var fx = cx + nx * S * 0.038, fy = cy + ny * S * 0.030;   // 五官层（视差更大）
-    g.save();
-    g.translate(cx + nx * S * 0.016, cy + ny * S * 0.012);
-    var skin = g.createRadialGradient(-R * 0.30, -R * 0.40, R * 0.12, 0, R * 0.05, R * 1.40);
-    skin.addColorStop(0, SKIN_HI);
-    skin.addColorStop(0.45, SKIN);
-    skin.addColorStop(0.78, SKIN_MID);
-    skin.addColorStop(1, mix(SKIN_MID, SKIN_LO, 0.55));
-    g.fillStyle = skin;
-    g.beginPath(); g.ellipse(0, 0, R, R * 1.10, 0, 0, Math.PI * 2); g.fill();
-    /* 下颌收窄（照片里下巴偏窄） */
-    g.beginPath();
-    g.moveTo(-R * 0.70, R * 0.42);
-    g.quadraticCurveTo(0, R * 1.30, R * 0.70, R * 0.42);
-    g.quadraticCurveTo(0, R * 0.86, -R * 0.70, R * 0.42);
-    g.fillStyle = mix(SKIN, SKIN_MID, 0.5);
-    g.fill();
-    /* 耳 */
-    for (var e2 = -1; e2 <= 1; e2 += 2) {
-      g.beginPath();
-      g.ellipse(e2 * R * 0.99, R * 0.06, R * 0.145, R * 0.20, 0, 0, Math.PI * 2);
-      g.fillStyle = mix(SKIN, SKIN_LO, 0.30); g.fill();
-    }
-    g.restore();
-
-    /* ---- 眉：偏粗、平直（照片特征） ---- */
-    var browLift = -R * (0.015 + near * 0.045);
-    g.strokeStyle = mix(HAIR, '#000000', 0.25);
-    g.lineWidth = R * 0.115; g.lineCap = 'round';
-    for (var b = -1; b <= 1; b += 2) {
-      var bx0 = fx + b * R * 0.62, by0 = fy - R * 0.335 + browLift;
-      g.beginPath();
-      g.moveTo(bx0 - b * R * 0.20, by0 + R * 0.035);
-      g.quadraticCurveTo(bx0 + b * R * 0.06, by0 - R * 0.055, bx0 + b * R * 0.30, by0 + R * 0.015);
-      g.stroke();
-    }
-
-    /* ---- 眼 ---- */
-    var eyeX = R * 0.415, eyeY = -R * 0.085;
-    var eyeR = R * 0.215;
-    for (var s2 = -1; s2 <= 1; s2 += 2) {
-      var ex = fx + s2 * eyeX, ey = fy + eyeY;
-      var openY = 1;
-      if (blinking) {
-        var kk = blinkPhase < 0.5 ? blinkPhase * 2 : (1 - blinkPhase) * 2;
-        openY = 1 - kk * 0.95;
-      }
-      /* 眼型：略窄长，不画大圆眼（照片里眼型偏细长） */
-      g.fillStyle = '#f4f6fa';
-      g.beginPath(); g.ellipse(ex, ey, eyeR, eyeR * 0.88 * openY, 0, 0, Math.PI * 2); g.fill();
-      if (openY > 0.22) {
-        var ix = ex + nx * eyeR * 0.40, iy = ey + ny * eyeR * 0.36;
-        var ir = eyeR * (0.52 + near * 0.10);
-        var iris = g.createRadialGradient(ix - ir * 0.2, iy - ir * 0.25, ir * 0.1, ix, iy, ir);
-        iris.addColorStop(0, IRIS_HI); iris.addColorStop(0.55, IRIS); iris.addColorStop(1, IRIS_LO);
-        g.fillStyle = iris;
-        g.beginPath(); g.arc(ix, iy, ir, 0, Math.PI * 2); g.fill();
-        /* 瞳孔开大：靠近时更明显 */
-        g.fillStyle = '#07080c';
-        g.beginPath(); g.arc(ix, iy, ir * (0.50 + near * 0.14), 0, Math.PI * 2); g.fill();
-        g.fillStyle = rgba('#ffffff', 0.92);
-        g.beginPath(); g.arc(ix - ir * 0.32, iy - ir * 0.38, ir * 0.26, 0, Math.PI * 2); g.fill();
-        /* 上眼睑投影 */
-        g.fillStyle = rgba(SKIN_LO, 0.26);
-        g.beginPath(); g.ellipse(ex, ey - eyeR * 0.66 * openY, eyeR * 1.02, eyeR * 0.24 * openY, 0, 0, Math.PI * 2); g.fill();
-      }
-      /* 上睫毛线：一条细黑，让眼睛有神 */
-      g.strokeStyle = rgba('#14161d', 0.75); g.lineWidth = R * 0.030;
-      g.beginPath(); g.ellipse(ex, ey, eyeR, eyeR * 0.88 * openY, 0, Math.PI * 1.06, Math.PI * 1.94); g.stroke();
-    }
-
-    /* ---- 鼻 ---- */
-    g.strokeStyle = rgba(SKIN_LO, 0.50); g.lineWidth = R * 0.052; g.lineCap = 'round';
-    g.beginPath();
-    g.moveTo(fx + nx * R * 0.04, fy + R * 0.02);
-    g.quadraticCurveTo(fx + nx * R * 0.08, fy + R * 0.22, fx + R * 0.075, fy + R * 0.27);
-    g.stroke();
-    g.fillStyle = rgba(SKIN_LO, 0.22);
-    for (var n2 = -1; n2 <= 1; n2 += 2) {
-      g.beginPath(); g.ellipse(fx + n2 * R * 0.085, fy + R * 0.275, R * 0.045, R * 0.032, 0, 0, Math.PI * 2); g.fill();
-    }
-
-    /* ---- 唇：偏厚，唇色自然粉；微笑随指针 ---- */
-    var smile = 0.24 + ny * 0.18 + near * 0.26;
-    smile = Math.max(0.05, Math.min(0.72, smile));
-    var ly = fy + R * 0.545, lw = R * 0.30;
-    /* 下唇 */
-    var lg = g.createLinearGradient(0, ly - R * 0.06, 0, ly + R * 0.20);
-    lg.addColorStop(0, LIP); lg.addColorStop(0.6, LIP); lg.addColorStop(1, LIP_LO);
-    g.fillStyle = lg;
-    g.beginPath();
-    g.moveTo(fx - lw, ly);
-    g.quadraticCurveTo(fx - lw * 0.5, ly + R * (0.11 + smile * 0.10), fx, ly + R * (0.12 + smile * 0.12));
-    g.quadraticCurveTo(fx + lw * 0.5, ly + R * (0.11 + smile * 0.10), fx + lw, ly);
-    g.quadraticCurveTo(fx, ly + R * (0.05 + smile * 0.04), fx - lw, ly);
-    g.fill();
-    /* 上唇 */
-    g.fillStyle = LIP_HI;
-    g.beginPath();
-    g.moveTo(fx - lw, ly);
-    g.quadraticCurveTo(fx - lw * 0.45, ly - R * (0.10 + smile * 0.05), fx - R * 0.02, ly - R * 0.035);
-    g.quadraticCurveTo(fx + lw * 0.45, ly - R * (0.10 + smile * 0.05), fx + lw, ly);
-    g.quadraticCurveTo(fx, ly - R * 0.015, fx - lw, ly);
-    g.fill();
-    /* 唇缝 */
-    g.strokeStyle = rgba('#5e2b28', 0.85); g.lineWidth = R * 0.030;
-    g.beginPath();
-    g.moveTo(fx - lw * 0.94, ly);
-    g.quadraticCurveTo(fx, ly + smile * R * 0.10, fx + lw * 0.94, ly);
-    g.stroke();
-    /* 下唇高光 */
-    g.fillStyle = rgba('#ffffff', 0.16);
-    g.beginPath(); g.ellipse(fx, ly + R * 0.10, lw * 0.42, R * 0.030, 0, 0, Math.PI * 2); g.fill();
-
-    /* ---- 眼镜：最强识别点。黑上半圈 + 细银下半圈 + 鼻梁架 ---- */
-    var gx = fx, gy = fy + eyeY, gw = R * 0.60, gh = R * 0.50;
-    g.lineCap = 'round';
-    for (var s3 = -1; s3 <= 1; s3 += 2) {
-      var ox = gx + s3 * eyeX, lx = ox - gw / 2, rx2 = ox + gw / 2;
-      var ty2 = gy - gh / 2, by3 = gy + gh / 2, rr = R * 0.13;
-      /* 镜片轻微提亮 */
-      g.fillStyle = rgba('#dfe9ff', 0.07 + near * 0.05);
-      g.beginPath(); g.roundRect(lx, ty2, gw, gh, rr); g.fill();
-      /* 下半圈：细银 */
-      g.strokeStyle = FRAME_HI; g.lineWidth = R * 0.035;
-      g.beginPath(); g.roundRect(lx, ty2, gw, gh, rr); g.stroke();
-      /* 上半圈：粗黑（照片里是 browline 框型） */
-      g.strokeStyle = FRAME; g.lineWidth = R * 0.095;
-      g.beginPath();
-      g.moveTo(lx, gy - gh * 0.10);
-      g.quadraticCurveTo(lx, ty2, ox, ty2);
-      g.quadraticCurveTo(rx2, ty2, rx2, gy - gh * 0.10);
-      g.stroke();
-      /* 镜片高光 */
-      g.strokeStyle = rgba('#ffffff', 0.20); g.lineWidth = R * 0.030;
-      g.beginPath();
-      g.moveTo(lx + gw * 0.16, gy + gh * 0.16);
-      g.lineTo(lx + gw * 0.34, gy - gh * 0.14);
-      g.stroke();
-      /* 镜腿 */
-      g.strokeStyle = FRAME; g.lineWidth = R * 0.055;
-      g.beginPath();
-      g.moveTo(s3 < 0 ? lx : rx2, ty2 + gh * 0.16);
-      g.lineTo(s3 * R * 1.06, ty2 + gh * 0.06);
-      g.stroke();
-    }
-    /* 鼻梁架 */
-    g.strokeStyle = FRAME; g.lineWidth = R * 0.055;
-    g.beginPath();
-    g.moveTo(gx - eyeX + gw / 2, gy - gh * 0.16);
-    g.quadraticCurveTo(gx, gy - gh * 0.40, gx + eyeX - gw / 2, gy - gh * 0.16);
-    g.stroke();
-
-    /* ---- 腮红：靠近时才有温度 ---- */
-    if (near > 0.02) {
-      for (var c2 = -1; c2 <= 1; c2 += 2) {
-        var bx = fx + c2 * R * 0.66, by = fy + R * 0.30;
-        var bg = g.createRadialGradient(bx, by, 0, bx, by, R * 0.36);
-        bg.addColorStop(0, rgba('#d4635c', 0.22 * near));
-        bg.addColorStop(1, rgba('#d4635c', 0));
-        g.fillStyle = bg;
-        g.beginPath(); g.arc(bx, by, R * 0.36, 0, Math.PI * 2); g.fill();
-      }
-    }
-
-    /* ---- 前发：垂到额前的不规则碎发（视差最大的一层） ---- */
-    g.save();
-    g.translate(cx + nx * S * 0.052, cy + ny * S * 0.042);
-    g.fillStyle = HAIR;
-    /* 主体刘海：左偏，宽度不均 */
-    g.beginPath();
-    g.moveTo(-R * 1.08, -R * 0.02);
-    g.quadraticCurveTo(-R * 0.98, -R * 1.02, -R * 0.12, -R * 1.16);
-    g.quadraticCurveTo(R * 0.62, -R * 1.24, R * 0.94, -R * 0.52);
-    g.quadraticCurveTo(R * 0.52, -R * 0.86, R * 0.06, -R * 0.66);
-    g.quadraticCurveTo(-R * 0.30, -R * 0.50, -R * 0.54, -R * 0.84);
-    g.quadraticCurveTo(-R * 0.84, -R * 0.44, -R * 1.08, -R * 0.02);
-    g.closePath(); g.fill();
-    /* 额前几缕细碎发 */
-    g.strokeStyle = mix(HAIR, HAIR_HI, 0.35); g.lineCap = 'round';
-    for (var f = 0; f < 7; f++) {
-      var px = -R * 0.74 + f * R * 0.26;
-      g.lineWidth = R * 0.030;
-      strand(px, -R * (0.86 - (f % 3) * 0.10), R * (0.40 + (f % 2) * 0.16),
-             Math.PI * (0.62 + (f % 3) * 0.06), (f % 2 ? 0.5 : -0.4), g.lineWidth);
-    }
-    /* 翘起的呆毛 */
-    g.strokeStyle = HAIR; g.lineWidth = R * 0.055;
-    strand(-R * 0.10, -R * 1.14, R * 0.62, -Math.PI * 0.62, 0.7, R * 0.055);
-    strand(R * 0.22, -R * 1.10, R * 0.50, -Math.PI * 0.40, -0.6, R * 0.048);
-    g.restore();
-
-    /* ---- 底部渐隐：必须淡到完全透明，否则会在页面留下一个方块 ---- */
-    var fade = g.createLinearGradient(0, H * 0.80, 0, H);
-    fade.addColorStop(0, rgba('#08090c', 0));
-    fade.addColorStop(0.55, rgba('#08090c', 0.55));
-    fade.addColorStop(1, rgba('#08090c', 1));
-    g.fillStyle = fade;
-    g.fillRect(0, H * 0.80, W, H * 0.20);
+  function wake() {
+    if (!animated || rafId || !inner) return;
+    rafId = requestAnimationFrame(function loop() {
+      rafId = 0;
+      render();
+      if (Math.abs(tx - nx) > 0.0015 || Math.abs(ty - ny) > 0.0015) wake();
+    });
   }
 
-  function frame(now) {
-    rafId = requestAnimationFrame(frame);
-    var dt = Math.min(0.05, (now - last) / 1000 || 0.016);
-    last = now; t += dt;
-    nx += (tx - nx) * Math.min(1, dt * 6.5);
-    ny += (ty - ny) * Math.min(1, dt * 6.5);
-    if (blinking) {
-      blinkPhase += dt / 0.16;
-      if (blinkPhase >= 1) { blinking = 0; blinkPhase = 0; blinkAt = t + 1.8 + Math.random() * 3.6; }
-    } else if (t >= blinkAt) { blinking = 1; blinkPhase = 0; }
-    draw();
+  function onMove(e) { aim(e.clientX, e.clientY); }
+
+  function start() {
+    if (!animated) return;
+    window.addEventListener('pointermove', onMove, { passive: true });
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) { if (rafId) { cancelAnimationFrame(rafId); rafId = 0; } }
+      else wake();
+    });
   }
-  function start() { if (!rafId) { last = performance.now(); rafId = requestAnimationFrame(frame); } }
-  function stop() { if (rafId) { cancelAnimationFrame(rafId); rafId = 0; } }
 
-  window.addEventListener('pointermove', function (e) { aim(e.clientX, e.clientY); }, { passive: true });
-  window.addEventListener('resize', function () { resize(); }, { passive: true });
-  document.addEventListener('visibilitychange', function () { document.hidden ? stop() : start(); });
-
+  /* 视图切换后重建 / 离开首页时清理 */
   function ensure() {
     var view = document.getElementById('view');
     if (!view) return;
-    if (view.querySelector('.cc-hd')) { if (build()) start(); }
-    else if (host && host.parentNode) {
+    if (view.querySelector('.cc-hd')) {
+      var fresh = !host;
+      if (build()) {
+        if (fresh) start();
+        wake();
+      }
+    } else if (host && host.parentNode) {
       host.parentNode.removeChild(host);
-      host = null; cv = null; g = null; stop();
+      host = null; frame = null; inner = null; glare = null;
+      if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
     }
   }
+
   function begin() {
     ensure();
     var v = document.getElementById('view');
     if (v) new MutationObserver(ensure).observe(v, { childList: true, subtree: false });
-    start();
   }
+
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', begin);
   else begin();
 })();

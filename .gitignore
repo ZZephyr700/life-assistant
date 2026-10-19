@@ -4,11 +4,6 @@ open-design/
 # 评审工具的临时产物
 .taste-skill/
 
-# portfolio 子站的开发源码与依赖（React + Vite 工程）
-# 构建产物输出到 portfolio/ 并提交，GitHub Pages 直接托管它；
-# 源码留在本地，要重新构建请进 source-portfolio/ 跑 npm run build。
-source-portfolio/
-
 # 系统文件
 Thumbs.db
 desktop.ini
